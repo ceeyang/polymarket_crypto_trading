@@ -1,0 +1,22 @@
+{
+  "name": "polymarket-eth-5m-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@polymarket/clob-client": "^4.21.0",
+    "axios": "^1.8.4",
+    "dotenv": "^16.4.5",
+    "ethers": "^5.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
