@@ -7,6 +7,7 @@ export interface GammaToken {
 }
 
 export interface GammaMarket {
+  [key: string]: unknown;
   id: string;
   conditionId?: string;
   question?: string;
@@ -48,6 +49,7 @@ export interface Prediction {
   probUp: number;
   confidence: number;
   modelScore: number;
+  modelName?: string;
 }
 
 export interface TradeDecision {
@@ -61,7 +63,20 @@ export interface TradeDecision {
   edge?: number;
 }
 
+export interface LiveTradeRecord {
+  marketId: string;
+  side: SideName;
+  entryTime: string;
+  settleTime: string;
+  entryRefPrice: number;
+  resolved?: boolean;
+  win?: boolean;
+  settleRefPrice?: number;
+  orderId?: string;
+}
+
 export interface BotState {
   tradedMarkets: Record<string, string>;
   lastTradeAt?: string;
+  trades?: LiveTradeRecord[];
 }

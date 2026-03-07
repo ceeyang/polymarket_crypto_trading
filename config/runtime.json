@@ -1,0 +1,50 @@
+{
+  "runtime": {
+    "dryRun": true,
+    "pollIntervalSec": 30
+  },
+  "prediction": {
+    "lookbackMinutes": 120,
+    "trainedModelPath": "state/models/eth_5m_logreg.json",
+    "minEdge": 0.03,
+    "baseBetUsd": 10,
+    "maxBetUsd": 30,
+    "priceAggression": 0.01
+  },
+  "marketFilter": {
+    "minMarketLiquidity": 500,
+    "minTimeToExpiryMin": 1,
+    "maxTimeToExpiryMin": 25,
+    "cooldownSeconds": 60
+  },
+  "network": {
+    "polyHost": "https://clob.polymarket.com",
+    "gammaHost": "https://gamma-api.polymarket.com",
+    "dataApiHost": "https://data-api.polymarket.com",
+    "relayerHost": "https://relayer-v2.polymarket.com",
+    "rpcUrl": "https://polygon-rpc.com",
+    "rpcUrls": [
+      "https://polygon-rpc.com",
+      "https://polygon-bor-rpc.publicnode.com",
+      "https://rpc.ankr.com/polygon"
+    ],
+    "chainId": 137,
+    "signatureType": 2,
+    "usdcAddress": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+    "ctfAddress": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+  },
+  "training": {
+    "symbol": "ETHUSDT",
+    "start": "2026-01-01T00:00:00Z",
+    "end": "2026-03-07T00:00:00Z",
+    "horizonMin": 5,
+    "lookbackMin": 120,
+    "stepMin": 1,
+    "valDays": 3,
+    "epochs": 400,
+    "learningRate": 0.05,
+    "l2": 0.001,
+    "patience": 40,
+    "modelOut": "state/models/eth_5m_logreg.json"
+  }
+}

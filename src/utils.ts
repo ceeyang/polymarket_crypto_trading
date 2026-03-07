@@ -7,7 +7,13 @@ export function parseJsonArray(value: unknown): string[] {
       const parsed = JSON.parse(t);
       if (Array.isArray(parsed)) return parsed.map((x) => String(x));
     } catch {
-      return [];
+      // fallback: parse forms like ['a','b'] or a,b
+      const normalized = t
+        .replace(/^\[|\]$/g, "")
+        .split(",")
+        .map((x) => x.trim().replace(/^['\"]|['\"]$/g, ""))
+        .filter((x) => x.length > 0);
+      return normalized;
     }
   }
   return [];

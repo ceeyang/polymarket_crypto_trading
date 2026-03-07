@@ -7,39 +7,74 @@ import { has5mHint, hasClockHint, hasEthKeyword, minutesUntil, parseJsonArray, t
 export class GammaClient {
   constructor(private readonly config: Config) {}
 
-  async getMarkets(limit = 500): Promise<GammaMarket[]> {
-    const { data } = await axios.get(`${this.config.gammaHost}/markets`, {
-      params: {
-        active: true,
-        closed: false,
-        limit,
-      },
-      timeout: 15000,
-    });
+  async getCandidateMarkets(limit = 500, now = new Date()): Promise<GammaMarket[]> {
+    const slugCandidates = this.buildEth5mSlugs(now);
+    const directMarkets = await this.fetchMarketsBySlugs(slugCandidates);
+    if (directMarkets.length > 0) {
+      return directMarkets;
+    }
+    return this.getMarkets(limit);
+  }
 
-    if (Array.isArray(data)) return data as GammaMarket[];
-    if (data && Array.isArray(data.data)) return data.data as GammaMarket[];
-    return [];
+  async getMarkets(limit = 500): Promise<GammaMarket[]> {
+    const pageSize = Math.min(Math.max(limit, 100), 1000);
+    const maxPages = 5;
+    const all: GammaMarket[] = [];
+    const seen = new Set<string>();
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const offset = page * pageSize;
+      const pageData = await this.fetchMarketPage(pageSize, offset);
+      if (!pageData.length) break;
+
+      for (const m of pageData) {
+        const id = String(m.id ?? "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        all.push(m);
+      }
+
+      if (pageData.length < pageSize) break;
+    }
+
+    return all;
+  }
+
+  getScanStats(markets: GammaMarket[]): { total: number; ethMatched: number; eth5mMatched: number } {
+    let ethMatched = 0;
+    let eth5mMatched = 0;
+
+    for (const m of markets) {
+      const searchable = this.getSearchableText(m);
+      if (!searchable) continue;
+      if (hasEthKeyword(searchable)) {
+        ethMatched += 1;
+        if (has5mHint(searchable)) eth5mMatched += 1;
+      }
+    }
+
+    return { total: markets.length, ethMatched, eth5mMatched };
   }
 
   selectBestEth5mMarket(markets: GammaMarket[], now = new Date()): SelectedMarket | null {
-    const candidates: SelectedMarket[] = [];
+    const strictCandidates: SelectedMarket[] = [];
+    const relaxedCandidates: SelectedMarket[] = [];
 
     for (const m of markets) {
       if (m.closed || m.archived) continue;
       if (m.enableOrderBook === false) continue;
 
-      const title = String(m.question ?? m.title ?? m.description ?? m.slug ?? "");
-      if (!title || !hasEthKeyword(title)) continue;
+      const searchable = this.getSearchableText(m);
+      if (!searchable || !hasEthKeyword(searchable)) continue;
+      if (!has5mHint(searchable)) continue;
 
-      const endDate = m.endDate;
+      const endDate = this.getEndDate(m);
       if (!endDate) continue;
 
       const minsLeft = minutesUntil(endDate, now);
-      if (minsLeft < this.config.minTimeToExpiryMin || minsLeft > this.config.maxTimeToExpiryMin) continue;
+      if (minsLeft <= 0) continue;
 
       const liquidity = toNum(m.liquidity, 0);
-      if (liquidity < this.config.minMarketLiquidity) continue;
 
       const outcomes = parseJsonArray(m.outcomes);
       const outcomePrices = parseJsonArray(m.outcomePrices).map((x) => toNum(x, NaN));
@@ -68,16 +103,16 @@ export class GammaClient {
       const noPrice = this.pickPrice(outcomePrices, noIdx, 1);
 
       const score = this.scoreMarket({
-        title,
+        title: searchable,
         minsLeft,
         liquidity,
         volume: toNum(m.volume, 0),
       });
 
-      candidates.push({
+      const candidate: SelectedMarket = {
         marketId: String(m.id),
         conditionId: String(m.conditionId ?? m.id),
-        title,
+        title: String(m.question ?? m.title ?? m.slug ?? searchable),
         endDate,
         liquidity,
         yesTokenId,
@@ -87,13 +122,29 @@ export class GammaClient {
         tickSize: Number.isFinite(m.orderPriceMinTickSize) ? Number(m.orderPriceMinTickSize) : 0.01,
         negRisk: Boolean(m.negRisk),
         score,
-      });
+      };
+
+      const isStrict =
+        minsLeft >= this.config.minTimeToExpiryMin &&
+        minsLeft <= this.config.maxTimeToExpiryMin &&
+        liquidity >= this.config.minMarketLiquidity;
+
+      if (isStrict) strictCandidates.push(candidate);
+
+      const isRelaxed = minsLeft <= 25;
+      if (isRelaxed) relaxedCandidates.push(candidate);
     }
 
-    if (!candidates.length) return null;
+    if (strictCandidates.length) {
+      strictCandidates.sort((a, b) => b.score - a.score);
+      return strictCandidates[0];
+    }
+    if (relaxedCandidates.length) {
+      relaxedCandidates.sort((a, b) => b.score - a.score);
+      return relaxedCandidates[0];
+    }
 
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0];
+    return null;
   }
 
   private findOutcomeIdx(outcomes: string[], keywords: string[]): number {
@@ -128,5 +179,111 @@ export class GammaClient {
     score += Math.min(20, Math.log10(volume + 1) * 5);
 
     return score;
+  }
+
+  private async fetchMarketPage(limit: number, offset: number): Promise<GammaMarket[]> {
+    const { data } = await axios.get(`${this.config.gammaHost}/markets`, {
+      params: {
+        active: true,
+        closed: false,
+        limit,
+        offset,
+      },
+      timeout: 15000,
+    });
+
+    if (Array.isArray(data)) return data as GammaMarket[];
+    if (data && Array.isArray(data.data)) return data.data as GammaMarket[];
+    return [];
+  }
+
+  private async fetchMarketsBySlugs(slugs: string[]): Promise<GammaMarket[]> {
+    const all: GammaMarket[] = [];
+    const seen = new Set<string>();
+
+    for (const slug of slugs) {
+      const markets = await this.fetchMarketsBySlug(slug);
+      for (const m of markets) {
+        const id = String(m.id ?? "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        all.push(m);
+      }
+    }
+
+    return all;
+  }
+
+  private async fetchMarketsBySlug(slug: string): Promise<GammaMarket[]> {
+    const attempts: Array<Record<string, unknown>> = [
+      { slug, active: true, closed: false, limit: 50 },
+      { slug, limit: 50 },
+    ];
+
+    for (const params of attempts) {
+      try {
+        const { data } = await axios.get(`${this.config.gammaHost}/markets`, {
+          params,
+          timeout: 15000,
+        });
+        const markets = Array.isArray(data) ? (data as GammaMarket[]) : (data?.data as GammaMarket[] | undefined) ?? [];
+        if (markets.length > 0) return markets;
+      } catch {
+        continue;
+      }
+    }
+
+    return [];
+  }
+
+  private buildEth5mSlugs(now = new Date()): string[] {
+    const nowSec = Math.floor(now.getTime() / 1000);
+    const anchor = Math.ceil(nowSec / 300) * 300;
+    const prefixes = ["eth", "ethereum"];
+    const slugs: string[] = [];
+
+    for (let i = -2; i <= 6; i += 1) {
+      const ts = anchor + i * 300;
+      for (const p of prefixes) {
+        slugs.push(`${p}-updown-5m-${ts}`);
+      }
+    }
+
+    return slugs;
+  }
+
+  private getSearchableText(m: GammaMarket): string {
+    const tagText = parseJsonArray(m.tags).join(" ");
+    const parts = [
+      m.question,
+      m.title,
+      m.description,
+      m.slug,
+      m.category,
+      m.series,
+      m.groupTitle,
+      m.groupItemTitle,
+      m.eventTitle,
+      m.ticker,
+      tagText,
+    ]
+      .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+      .join(" ");
+    return parts;
+  }
+
+  private getEndDate(m: GammaMarket): string | null {
+    const candidates = [
+      m.endDate,
+      m.end_date_iso,
+      m.closeTime,
+      m.expirationTime,
+      m.resolveDate,
+      m.gameStartTime,
+    ];
+    for (const c of candidates) {
+      if (typeof c === "string" && c.trim().length > 0) return c;
+    }
+    return null;
   }
 }
