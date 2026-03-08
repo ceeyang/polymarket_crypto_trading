@@ -431,6 +431,7 @@
         <button class="tab-btn active" id="tabRuntime" data-tab="runtime" role="tab" aria-selected="true">运行配置</button>
         <button class="tab-btn" id="tabTrades" data-tab="trades" role="tab" aria-selected="false">交易记录</button>
         <button class="tab-btn" id="tabLogs" data-tab="logs" role="tab" aria-selected="false">运行日志</button>
+        <button class="tab-btn" id="tabModels" data-tab="models" role="tab" aria-selected="false">模型工厂</button>
         <button class="tab-btn" id="tabBacktest" data-tab="backtest" role="tab" aria-selected="false">回测模块</button>
       </div>
 
@@ -609,15 +610,145 @@
           </div>
         </section>
 
+        <section class="card module-panel" data-module="models" role="tabpanel">
+          <h2>模型工厂</h2>
+          <div class="row" style="margin-bottom: 8px">
+            <button id="refreshModelsBtn">刷新模型</button>
+            <button id="initModelsBtn">初始化默认模型</button>
+            <button id="trainModelBtn">训练当前模型</button>
+            <button id="newModelBtn">新建模型</button>
+            <label class="muted" for="modelListFilter">列表筛选</label>
+            <select id="modelListFilter" class="select" style="min-width: 140px;">
+              <option value="">全部盘口</option>
+            </select>
+            <span id="modelsStatus" class="muted"></span>
+          </div>
+
+          <div class="form-grid" style="margin-top: 6px">
+            <div class="field">
+              <label>训练目标</label>
+              <select id="modelTarget" class="select"></select>
+            </div>
+            <div class="field">
+              <label>模型名称</label>
+              <input id="modelName" type="text" placeholder="BTC_5m_d21_custom" />
+            </div>
+            <div class="field">
+              <label>训练天数</label>
+              <input id="modelTrainDays" type="number" min="1" step="1" />
+            </div>
+            <div class="field">
+              <label>lookback(分钟)</label>
+              <input id="modelLookback" type="number" min="60" step="1" />
+            </div>
+            <div class="field">
+              <label>step(分钟)</label>
+              <input id="modelStep" type="number" min="1" step="1" />
+            </div>
+            <div class="field">
+              <label>valDays</label>
+              <input id="modelValDays" type="number" min="1" step="1" />
+            </div>
+            <div class="field">
+              <label>epochs</label>
+              <input id="modelEpochs" type="number" min="20" step="1" />
+            </div>
+            <div class="field">
+              <label>learningRate</label>
+              <input id="modelLr" type="number" min="0.00001" step="0.00001" />
+            </div>
+            <div class="field">
+              <label>L2</label>
+              <input id="modelL2" type="number" min="0" step="0.0001" />
+            </div>
+            <div class="field">
+              <label>patience</label>
+              <input id="modelPatience" type="number" min="5" step="1" />
+            </div>
+            <div class="field" style="grid-column: span 2;">
+              <label>模型输出路径</label>
+              <input id="modelPath" type="text" placeholder="state/models/btc_5m_custom.json" />
+            </div>
+          </div>
+
+          <div class="row" style="margin-bottom: 8px">
+            <button id="saveModelBtn">保存模型配置</button>
+            <span id="modelEditorStatus" class="muted"></span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>选择</th>
+                  <th>名称</th>
+                  <th>目标</th>
+                  <th>训练天数</th>
+                  <th>状态</th>
+                  <th>模型路径</th>
+                  <th>最近训练</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="modelsBody">
+                <tr><td colspan="8" class="muted">暂无模型配置</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="card module-panel" data-module="backtest" role="tabpanel">
           <h2>模型回测</h2>
           <div class="row" style="margin-bottom: 8px">
             <label class="muted">盘口</label>
             <select id="btTarget" class="select"></select>
+            <label class="muted">模型</label>
+            <select id="btModel" class="select"></select>
             <label class="muted">周期</label>
             <select id="btDays" class="select"></select>
+            <label class="muted">每页</label>
+            <select id="btPageSize" class="select">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+            </select>
             <button id="runBacktestBtn">开始回测</button>
             <span id="btStatus" class="muted"></span>
+          </div>
+
+          <div class="row" style="margin-bottom: 8px">
+            <span class="muted">最大连续错误(全样本): <b id="btMaxErr">-</b></span>
+            <span class="muted">最大连续错误(触发交易): <b id="btMaxTradeErr">-</b></span>
+          </div>
+
+          <div class="row" style="margin-bottom: 8px">
+            <label class="target-item" style="padding:6px 10px;">
+              <input id="btCompareDefault" type="checkbox" checked />
+              <span>包含默认模型</span>
+            </label>
+            <button id="runBacktestCompareBtn">对比当前盘口全部模型</button>
+            <span id="btCompareStatus" class="muted"></span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>排名</th>
+                  <th>模型</th>
+                  <th>交易胜率</th>
+                  <th>交易次数</th>
+                  <th>模型胜率</th>
+                  <th>交易出现率</th>
+                  <th>最大连错(交易)</th>
+                  <th>样本数</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody id="btCompareBody">
+                <tr><td colspan="9" class="muted">点击“对比当前盘口全部模型”开始</td></tr>
+              </tbody>
+            </table>
           </div>
 
           <div class="table-wrap">
@@ -629,14 +760,42 @@
                   <th>模型胜率</th>
                   <th>交易次数</th>
                   <th>交易胜率</th>
-                  <th>总胜率</th>
                   <th>交易出现率</th>
                 </tr>
               </thead>
               <tbody id="btBody">
-                <tr><td colspan="7" class="muted">请选择盘口后运行回测</td></tr>
+                <tr><td colspan="6" class="muted">请选择盘口后运行回测</td></tr>
               </tbody>
             </table>
+          </div>
+
+          <div class="table-wrap" style="margin-top:10px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>开始时间</th>
+                  <th>结束时间</th>
+                  <th>预测</th>
+                  <th>真实</th>
+                  <th>概率UP</th>
+                  <th>Edge</th>
+                  <th>触发交易</th>
+                  <th>结果</th>
+                  <th>开始价</th>
+                  <th>结束价</th>
+                </tr>
+              </thead>
+              <tbody id="btRecordsBody">
+                <tr><td colspan="11" class="muted">暂无回测明细</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="row" style="margin-top: 10px">
+            <button id="btPrevBtn">上一页</button>
+            <button id="btNextBtn">下一页</button>
+            <span id="btPageInfo" class="muted"></span>
           </div>
         </section>
       </div>
@@ -645,6 +804,12 @@
     <script>
       let fullConfig = null;
       const tradeQuery = { page: 1, pageSize: 20, targetId: "", resolved: "" };
+      const btQuery = { page: 1, pageSize: 100 };
+      let btRecordsAll = [];
+      let btCompareItems = [];
+      let modelProfiles = [];
+      let selectedModelProfileId = "";
+      let modelListFilterTargetId = "";
 
       const cfgStatus = document.getElementById("cfgStatus");
       const logArea = document.getElementById("logArea");
@@ -664,10 +829,42 @@
       const tradeNextBtn = document.getElementById("tradeNextBtn");
       const tradePageInfo = document.getElementById("tradePageInfo");
       const btTarget = document.getElementById("btTarget");
+      const btModel = document.getElementById("btModel");
       const btDays = document.getElementById("btDays");
+      const btPageSize = document.getElementById("btPageSize");
       const btBody = document.getElementById("btBody");
+      const btRecordsBody = document.getElementById("btRecordsBody");
       const btStatus = document.getElementById("btStatus");
+      const btMaxErr = document.getElementById("btMaxErr");
+      const btMaxTradeErr = document.getElementById("btMaxTradeErr");
+      const btPrevBtn = document.getElementById("btPrevBtn");
+      const btNextBtn = document.getElementById("btNextBtn");
+      const btPageInfo = document.getElementById("btPageInfo");
       const runBacktestBtn = document.getElementById("runBacktestBtn");
+      const runBacktestCompareBtn = document.getElementById("runBacktestCompareBtn");
+      const btCompareDefault = document.getElementById("btCompareDefault");
+      const btCompareStatus = document.getElementById("btCompareStatus");
+      const btCompareBody = document.getElementById("btCompareBody");
+      const refreshModelsBtn = document.getElementById("refreshModelsBtn");
+      const initModelsBtn = document.getElementById("initModelsBtn");
+      const trainModelBtn = document.getElementById("trainModelBtn");
+      const newModelBtn = document.getElementById("newModelBtn");
+      const modelListFilter = document.getElementById("modelListFilter");
+      const saveModelBtn = document.getElementById("saveModelBtn");
+      const modelsStatus = document.getElementById("modelsStatus");
+      const modelEditorStatus = document.getElementById("modelEditorStatus");
+      const modelTarget = document.getElementById("modelTarget");
+      const modelName = document.getElementById("modelName");
+      const modelTrainDays = document.getElementById("modelTrainDays");
+      const modelLookback = document.getElementById("modelLookback");
+      const modelStep = document.getElementById("modelStep");
+      const modelValDays = document.getElementById("modelValDays");
+      const modelEpochs = document.getElementById("modelEpochs");
+      const modelLr = document.getElementById("modelLr");
+      const modelL2 = document.getElementById("modelL2");
+      const modelPatience = document.getElementById("modelPatience");
+      const modelPath = document.getElementById("modelPath");
+      const modelsBody = document.getElementById("modelsBody");
       const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
       const modulePanels = Array.from(document.querySelectorAll(".module-panel"));
       let activeTab = "runtime";
@@ -743,7 +940,7 @@
         for (const t of targets || []) {
           const opt = document.createElement("option");
           opt.value = t.id || "";
-          opt.textContent = `${t.id} (${t.coin} ${Number(t.horizonMin) === 60 ? "1h" : `${t.horizonMin}m`})`;
+          opt.textContent = `${t.coin || "-"}-${Number(t.horizonMin) === 60 ? "1H" : `${t.horizonMin}M`}`;
           tradeTarget.appendChild(opt);
         }
         tradeTarget.value = prev;
@@ -752,22 +949,216 @@
       function getBacktestDaysOptions(horizonMin) {
         if (Number(horizonMin) === 5) return [1, 3, 7];
         if (Number(horizonMin) === 15) return [1, 3, 7, 15];
+        if (Number(horizonMin) === 60) return [1, 3, 7, 15];
         return [];
+      }
+
+      function modelLabel(p) {
+        if (!p) return "-";
+        const h = Number(p.horizonMin) === 60 ? "1h" : `${p.horizonMin}m`;
+        return `${p.name} (${p.coin}-${h})`;
+      }
+
+      function renderModelTargetOptions(targets) {
+        const prev = modelTarget.value || "";
+        modelTarget.innerHTML = "";
+        for (const t of targets || []) {
+          const opt = document.createElement("option");
+          opt.value = t.id || "";
+          opt.textContent = `${t.coin || "-"}-${Number(t.horizonMin) === 60 ? "1H" : `${t.horizonMin}M`}`;
+          modelTarget.appendChild(opt);
+        }
+        modelTarget.value = (targets || []).some((t) => t.id === prev) ? prev : ((targets || [])[0]?.id || "");
+      }
+
+      function renderModelListFilterOptions(targets) {
+        const prev = modelListFilter.value || modelListFilterTargetId || "";
+        modelListFilter.innerHTML = '<option value="">全部盘口</option>';
+        for (const t of targets || []) {
+          const opt = document.createElement("option");
+          opt.value = t.id || "";
+          opt.textContent = `${t.coin || "-"}-${Number(t.horizonMin) === 60 ? "1H" : `${t.horizonMin}M`}`;
+          modelListFilter.appendChild(opt);
+        }
+        modelListFilter.value = (targets || []).some((t) => t.id === prev) ? prev : "";
+        modelListFilterTargetId = modelListFilter.value || "";
+      }
+
+      function fillModelEditor(p) {
+        if (!p) return;
+        modelTarget.value = p.targetId || modelTarget.value;
+        modelName.value = p.name || "";
+        modelTrainDays.value = String(p.trainDays ?? 30);
+        modelLookback.value = String(p.lookbackMin ?? 180);
+        modelStep.value = String(p.stepMin ?? 1);
+        modelValDays.value = String(p.valDays ?? 3);
+        modelEpochs.value = String(p.epochs ?? 400);
+        modelLr.value = String(p.learningRate ?? 0.03);
+        modelL2.value = String(p.l2 ?? 0.001);
+        modelPatience.value = String(p.patience ?? 40);
+        modelPath.value = p.modelPath || "";
+      }
+
+      function getModelDefaultsByTargetId(targetId) {
+        const targets = Array.isArray(fullConfig?.prediction?.targets) ? fullConfig.prediction.targets : [];
+        const t = targets.find((x) => x.id === targetId);
+        const horizon = Number(t?.horizonMin || 5);
+        const coin = String(t?.coin || "BTC").toUpperCase();
+        const hTag = horizon === 60 ? "1h" : `${horizon}m`;
+        if (horizon === 5) {
+          return {
+            name: `${coin}_${hTag}_d21_custom`,
+            trainDays: 21,
+            lookbackMin: 180,
+            stepMin: 1,
+            valDays: 3,
+            epochs: 500,
+            learningRate: 0.04,
+            l2: 0.001,
+            patience: 60,
+            modelPath: `state/models/${coin.toLowerCase()}_${hTag}_custom_logreg.json`,
+          };
+        }
+        if (horizon === 15) {
+          return {
+            name: `${coin}_${hTag}_d45_custom`,
+            trainDays: 45,
+            lookbackMin: 240,
+            stepMin: 3,
+            valDays: 5,
+            epochs: 420,
+            learningRate: 0.03,
+            l2: 0.0015,
+            patience: 50,
+            modelPath: `state/models/${coin.toLowerCase()}_${hTag}_custom_logreg.json`,
+          };
+        }
+        return {
+          name: `${coin}_${hTag}_d90_custom`,
+          trainDays: 90,
+          lookbackMin: 360,
+          stepMin: 10,
+          valDays: 7,
+          epochs: 320,
+          learningRate: 0.02,
+          l2: 0.002,
+          patience: 40,
+          modelPath: `state/models/${coin.toLowerCase()}_${hTag}_custom_logreg.json`,
+        };
+      }
+
+      function fillModelEditorByTarget(targetId) {
+        const d = getModelDefaultsByTargetId(targetId);
+        modelTarget.value = targetId || modelTarget.value;
+        modelName.value = d.name;
+        modelTrainDays.value = String(d.trainDays);
+        modelLookback.value = String(d.lookbackMin);
+        modelStep.value = String(d.stepMin);
+        modelValDays.value = String(d.valDays);
+        modelEpochs.value = String(d.epochs);
+        modelLr.value = String(d.learningRate);
+        modelL2.value = String(d.l2);
+        modelPatience.value = String(d.patience);
+        modelPath.value = d.modelPath;
+      }
+
+      function renderBacktestModelOptions() {
+        const targetId = btTarget.value || "";
+        const list = modelProfiles.filter((p) => p.targetId === targetId);
+        const prev = btModel.value || "";
+        btModel.innerHTML = "";
+        if (!list.length) {
+          const opt = document.createElement("option");
+          opt.value = "";
+          opt.textContent = "默认目标模型";
+          btModel.appendChild(opt);
+          btModel.value = "";
+          return;
+        }
+        const firstDefault = document.createElement("option");
+        firstDefault.value = "";
+        firstDefault.textContent = "默认目标模型";
+        btModel.appendChild(firstDefault);
+        for (const p of list) {
+          const opt = document.createElement("option");
+          opt.value = p.id;
+          opt.textContent = modelLabel(p);
+          btModel.appendChild(opt);
+        }
+        btModel.value = list.some((x) => x.id === prev) ? prev : "";
+      }
+
+      function renderModelProfiles(list) {
+        modelProfiles = Array.isArray(list) ? list : [];
+        modelsBody.innerHTML = "";
+        const viewList = modelListFilterTargetId
+          ? modelProfiles.filter((p) => p.targetId === modelListFilterTargetId)
+          : modelProfiles;
+
+        if (!modelProfiles.length) {
+          modelsBody.innerHTML = '<tr><td colspan="8" class="muted">暂无模型配置</td></tr>';
+          selectedModelProfileId = "";
+          if (modelTarget.value) {
+            fillModelEditorByTarget(modelTarget.value);
+          }
+          renderBacktestModelOptions();
+          return;
+        }
+
+        if (!viewList.length) {
+          modelsBody.innerHTML = '<tr><td colspan="8" class="muted">当前筛选下暂无模型</td></tr>';
+        }
+
+        for (const p of viewList) {
+          const tr = document.createElement("tr");
+          const checked = p.id === selectedModelProfileId ? "checked" : "";
+          const horizonText = Number(p.horizonMin) === 60 ? "1h" : `${p.horizonMin}m`;
+          tr.innerHTML = `
+            <td><input type="radio" name="modelPick" value="${escapeHtml(p.id)}" ${checked} /></td>
+            <td>${escapeHtml(p.name || p.id)}</td>
+            <td>${escapeHtml(`${p.coin}-${horizonText.toUpperCase()}`)}</td>
+            <td>${Number(p.trainDays ?? 0)}</td>
+            <td>${escapeHtml(p.status || "idle")}</td>
+            <td>${escapeHtml(p.modelPath || "-")}</td>
+            <td>${p.lastTrainedAt ? fmtTime(p.lastTrainedAt) : "-"}</td>
+            <td><button class="model-delete" data-profile-id="${escapeHtml(p.id)}">删除</button></td>
+          `;
+          modelsBody.appendChild(tr);
+        }
+
+        if (!viewList.length) {
+          selectedModelProfileId = "";
+          if (modelTarget.value) fillModelEditorByTarget(modelTarget.value);
+          renderBacktestModelOptions();
+          return;
+        }
+
+        if (!selectedModelProfileId || !viewList.some((p) => p.id === selectedModelProfileId)) {
+          selectedModelProfileId = viewList[0].id;
+        }
+        const selected = modelProfiles.find((p) => p.id === selectedModelProfileId) || viewList[0];
+        if (selected) fillModelEditor(selected);
+        renderBacktestModelOptions();
       }
 
       function renderBacktestTargets(targets) {
         const prev = btTarget.value || "";
-        const list = (targets || []).filter((t) => Number(t.horizonMin) === 5 || Number(t.horizonMin) === 15);
+        const list = (targets || []).filter((t) => {
+          const h = Number(t.horizonMin);
+          return h === 5 || h === 15 || h === 60;
+        });
         btTarget.innerHTML = "";
         for (const t of list) {
           const opt = document.createElement("option");
           opt.value = t.id || "";
-          opt.textContent = `${t.coin || "-"}-${Number(t.horizonMin)}M (${t.id})`;
+          const h = Number(t.horizonMin) === 60 ? "1H" : `${Number(t.horizonMin)}M`;
+          opt.textContent = `${t.coin || "-"}-${h}`;
           opt.setAttribute("data-horizon", String(t.horizonMin || ""));
           btTarget.appendChild(opt);
         }
         btTarget.value = list.some((t) => t.id === prev) ? prev : (list[0]?.id || "");
         syncBacktestDays();
+        renderBacktestModelOptions();
       }
 
       function syncBacktestDays() {
@@ -789,21 +1180,98 @@
       function renderBacktestResult(result) {
         btBody.innerHTML = "";
         if (!result || typeof result !== "object") {
-          btBody.innerHTML = '<tr><td colspan="7" class="muted">暂无回测结果</td></tr>';
+          btBody.innerHTML = '<tr><td colspan="6" class="muted">暂无回测结果</td></tr>';
+          btMaxErr.textContent = "-";
+          btMaxTradeErr.textContent = "-";
           return;
         }
         const tr = document.createElement("tr");
-        const label = `${result.coin || "-"}-${result.horizonMin || "-"}M (${result.targetId || "-"})`;
+        const label = `${result.coin || "-"}-${result.horizonMin || "-"}M`;
         tr.innerHTML = `
           <td>${escapeHtml(label)}</td>
           <td>${Number(result.sampleCount ?? 0)}</td>
           <td>${(Number(result.predictionWinRate ?? 0) * 100).toFixed(2)}%</td>
           <td>${Number(result.tradeCount ?? 0)}</td>
           <td>${(Number(result.tradeWinRate ?? 0) * 100).toFixed(2)}%</td>
-          <td>${(Number(result.totalWinRate ?? 0) * 100).toFixed(2)}%</td>
           <td>${(Number(result.tradeSignalRate ?? 0) * 100).toFixed(2)}%</td>
         `;
         btBody.appendChild(tr);
+        btMaxErr.textContent = String(Number(result.maxConsecutivePredictionLosses ?? 0));
+        btMaxTradeErr.textContent = String(Number(result.maxConsecutiveTradeLosses ?? 0));
+      }
+
+      function renderBacktestCompare(items) {
+        btCompareBody.innerHTML = "";
+        const list = Array.isArray(items) ? items : [];
+        if (!list.length) {
+          btCompareBody.innerHTML = '<tr><td colspan="9" class="muted">暂无对比结果</td></tr>';
+          return;
+        }
+        for (const x of list) {
+          const r = x?.result || null;
+          const winRate = r ? `${(Number(r.tradeWinRate || 0) * 100).toFixed(2)}%` : "-";
+          const tradeCount = r ? String(Number(r.tradeCount || 0)) : "-";
+          const predRate = r ? `${(Number(r.predictionWinRate || 0) * 100).toFixed(2)}%` : "-";
+          const signalRate = r ? `${(Number(r.tradeSignalRate || 0) * 100).toFixed(2)}%` : "-";
+          const maxTradeLoss = r ? String(Number(r.maxConsecutiveTradeLosses || 0)) : "-";
+          const samples = r ? String(Number(r.sampleCount || 0)) : "-";
+          const status = x?.ok ? "OK" : `失败: ${String(x?.error || "-")}`;
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${x?.rank == null ? "-" : Number(x.rank)}</td>
+            <td title="${escapeHtml(String(x?.modelPath || ""))}">${escapeHtml(String(x?.modelName || x?.profileId || "-"))}</td>
+            <td>${winRate}</td>
+            <td>${tradeCount}</td>
+            <td>${predRate}</td>
+            <td>${signalRate}</td>
+            <td>${maxTradeLoss}</td>
+            <td>${samples}</td>
+            <td>${escapeHtml(status)}</td>
+          `;
+          btCompareBody.appendChild(tr);
+        }
+      }
+
+      function renderBacktestRecords() {
+        btRecordsBody.innerHTML = "";
+        if (!Array.isArray(btRecordsAll) || btRecordsAll.length === 0) {
+          btRecordsBody.innerHTML = '<tr><td colspan="11" class="muted">暂无回测明细</td></tr>';
+          btPageInfo.textContent = "";
+          btPrevBtn.disabled = true;
+          btNextBtn.disabled = true;
+          return;
+        }
+
+        const pageSize = Math.max(10, Number(btQuery.pageSize || 100));
+        const total = btRecordsAll.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        btQuery.page = Math.min(Math.max(1, btQuery.page), totalPages);
+        const start = (btQuery.page - 1) * pageSize;
+        const pageRows = btRecordsAll.slice(start, start + pageSize);
+
+        for (const r of pageRows) {
+          const tr = document.createElement("tr");
+          const tradedText = r.traded ? "是" : "否";
+          const tradedResult = r.tradeWin == null ? "-" : (r.tradeWin ? "WIN" : "LOSE");
+          tr.innerHTML = `
+            <td>${Number(r.seq ?? 0)}</td>
+            <td>${fmtTime(r.entryTime)}</td>
+            <td>${fmtTime(r.settleTime)}</td>
+            <td>${r.predSide || "-"}</td>
+            <td>${r.actualSide || "-"}</td>
+            <td>${(Number(r.predProbUp ?? 0) * 100).toFixed(2)}%</td>
+            <td>${Number(r.edge ?? 0).toFixed(4)}</td>
+            <td>${tradedText}</td>
+            <td>${tradedResult}</td>
+            <td>${fmtNumber(r.entryPrice, 6)}</td>
+            <td>${fmtNumber(r.settlePrice, 6)}</td>
+          `;
+          btRecordsBody.appendChild(tr);
+        }
+
+        btPageInfo.textContent = `第 ${btQuery.page} / ${totalPages} 页，共 ${total} 条`;
+        btPrevBtn.disabled = btQuery.page <= 1;
+        btNextBtn.disabled = btQuery.page >= totalPages;
       }
 
       function renderTradeSummary(summary) {
@@ -891,6 +1359,11 @@
         renderTargets(targets);
         renderTradeTargets(targets);
         renderBacktestTargets(targets);
+        renderModelTargetOptions(targets);
+        renderModelListFilterOptions(targets);
+        if (!selectedModelProfileId && modelTarget.value) {
+          fillModelEditorByTarget(modelTarget.value);
+        }
       }
 
       function readFormToConfig() {
@@ -962,6 +1435,7 @@
 
           fullConfig = next;
           fillForm(next);
+          await loadModelProfiles();
           cfgStatus.textContent = `已保存，bot 将在下一轮自动重载（token=${data.reloadToken || "-"}）`;
         } catch (err) {
           cfgStatus.textContent = `保存失败: ${String(err)}`;
@@ -971,6 +1445,7 @@
       async function runBacktest() {
         const targetId = String(btTarget.value || "").trim();
         const days = Number(btDays.value || "0");
+        const profileId = String(btModel.value || "").trim();
         if (!targetId) {
           btStatus.textContent = "请选择回测盘口";
           return;
@@ -983,22 +1458,185 @@
         try {
           runBacktestBtn.disabled = true;
           btStatus.textContent = "回测运行中...";
+          btQuery.page = 1;
           const resp = await fetch("/api/backtest/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ targetId, days }),
+            body: JSON.stringify({ targetId, days, profileId }),
           });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           renderBacktestResult(data?.result || null);
+          btRecordsAll = Array.isArray(data?.records) ? data.records : [];
+          renderBacktestRecords();
           const summary = data?.result
-            ? `完成: 样本${data.result.sampleCount}, 交易${data.result.tradeCount}, 交易胜率${(Number(data.result.tradeWinRate || 0) * 100).toFixed(2)}%`
+            ? `完成: 样本${data.result.sampleCount}, 交易${data.result.tradeCount}, 交易胜率${(Number(data.result.tradeWinRate || 0) * 100).toFixed(2)}%, 最大连续错误${Number(data.result.maxConsecutivePredictionLosses || 0)}`
             : "完成";
           btStatus.textContent = summary;
         } catch (err) {
+          btRecordsAll = [];
+          renderBacktestRecords();
           btStatus.textContent = `回测失败: ${String(err)}`;
         } finally {
           runBacktestBtn.disabled = false;
+        }
+      }
+
+      async function runBacktestCompare() {
+        const targetId = String(btTarget.value || "").trim();
+        const days = Number(btDays.value || "0");
+        if (!targetId) {
+          btCompareStatus.textContent = "请选择回测盘口";
+          return;
+        }
+        if (!Number.isFinite(days) || days <= 0) {
+          btCompareStatus.textContent = "请选择有效回测周期";
+          return;
+        }
+        try {
+          runBacktestCompareBtn.disabled = true;
+          btCompareStatus.textContent = "模型对比运行中...";
+          btCompareItems = [];
+          renderBacktestCompare(btCompareItems);
+          const includeDefault = Boolean(btCompareDefault?.checked);
+          const resp = await fetch("/api/backtest/compare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ targetId, days, includeDefault }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          btCompareItems = Array.isArray(data?.items) ? data.items : [];
+          renderBacktestCompare(btCompareItems);
+          const okCount = btCompareItems.filter((x) => x?.ok).length;
+          btCompareStatus.textContent = `对比完成: 总${btCompareItems.length}，成功${okCount}`;
+        } catch (err) {
+          btCompareItems = [];
+          renderBacktestCompare(btCompareItems);
+          btCompareStatus.textContent = `对比失败: ${String(err)}`;
+        } finally {
+          runBacktestCompareBtn.disabled = false;
+        }
+      }
+
+      async function loadModelProfiles() {
+        try {
+          modelsStatus.textContent = "模型加载中...";
+          const resp = await fetch("/api/models/profiles");
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          const list = Array.isArray(data?.profiles) ? data.profiles : [];
+          renderModelProfiles(list);
+          modelsStatus.textContent = `模型数量 ${list.length}`;
+        } catch (err) {
+          modelsStatus.textContent = `加载失败: ${String(err)}`;
+        }
+      }
+
+      async function initModelProfiles() {
+        try {
+          modelsStatus.textContent = "初始化中...";
+          const resp = await fetch("/api/models/init", { method: "POST" });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          renderModelProfiles(Array.isArray(data?.profiles) ? data.profiles : []);
+          modelsStatus.textContent = "默认模型初始化完成";
+        } catch (err) {
+          modelsStatus.textContent = `初始化失败: ${String(err)}`;
+        }
+      }
+
+      async function saveModelProfile() {
+        try {
+          modelEditorStatus.textContent = "保存中...";
+          const payload = {
+            id: selectedModelProfileId || undefined,
+            targetId: String(modelTarget.value || "").trim(),
+            name: String(modelName.value || "").trim(),
+            trainDays: Number(modelTrainDays.value || "0"),
+            lookbackMin: Number(modelLookback.value || "0"),
+            stepMin: Number(modelStep.value || "0"),
+            valDays: Number(modelValDays.value || "0"),
+            epochs: Number(modelEpochs.value || "0"),
+            learningRate: Number(modelLr.value || "0"),
+            l2: Number(modelL2.value || "0"),
+            patience: Number(modelPatience.value || "0"),
+            modelPath: String(modelPath.value || "").trim(),
+          };
+          if (!payload.targetId) {
+            throw new Error("targetId 不能为空");
+          }
+          const resp = await fetch("/api/models/profile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          selectedModelProfileId = data?.profile?.id || selectedModelProfileId;
+          modelEditorStatus.textContent = "保存成功";
+          await loadModelProfiles();
+        } catch (err) {
+          modelEditorStatus.textContent = `保存失败: ${String(err)}`;
+        }
+      }
+
+      async function trainCurrentModel() {
+        try {
+          if (!selectedModelProfileId) {
+            throw new Error("请先选择模型");
+          }
+          modelsStatus.textContent = "训练中...";
+          const resp = await fetch("/api/models/train", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profileId: selectedModelProfileId }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          modelsStatus.textContent = `训练完成: ${data?.profile?.name || selectedModelProfileId}`;
+          await loadModelProfiles();
+        } catch (err) {
+          modelsStatus.textContent = `训练失败: ${String(err)}`;
+        }
+      }
+
+      function startNewModelDraft() {
+        const targetId = String(modelTarget.value || "").trim() || String(modelListFilterTargetId || "").trim();
+        selectedModelProfileId = "";
+        document.querySelectorAll('input[name="modelPick"]').forEach((el) => {
+          if (el instanceof HTMLInputElement) el.checked = false;
+        });
+        if (targetId) {
+          fillModelEditorByTarget(targetId);
+        }
+        modelEditorStatus.textContent = "新建模型草稿（未保存）";
+      }
+
+      async function deleteModelProfile(profileId) {
+        const id = String(profileId || "").trim();
+        if (!id) return;
+        const picked = modelProfiles.find((p) => p.id === id);
+        const name = picked?.name || id;
+        const ok = window.confirm(`确认删除模型 ${name} ?\n将同时删除模型配置，并尝试删除模型文件。`);
+        if (!ok) return;
+        try {
+          modelsStatus.textContent = `删除中: ${name}...`;
+          const resp = await fetch("/api/models/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profileId: id, deleteModelFile: true }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          if (selectedModelProfileId === id) {
+            selectedModelProfileId = "";
+          }
+          renderModelProfiles(Array.isArray(data?.profiles) ? data.profiles : []);
+          const removed = data?.deleted?.modelFileDeleted ? "，模型文件已删除" : "";
+          modelsStatus.textContent = `删除成功: ${name}${removed}`;
+        } catch (err) {
+          modelsStatus.textContent = `删除失败: ${String(err)}`;
         }
       }
 
@@ -1110,6 +1748,7 @@
 
       document.getElementById("loadBtn").addEventListener("click", async () => {
         await loadConfig();
+        await loadModelProfiles();
         tradeQuery.page = 1;
         await loadTrades();
       });
@@ -1121,6 +1760,12 @@
       document.getElementById("refreshBalanceBtn").addEventListener("click", loadAccount);
       document.getElementById("claimBalanceBtn").addEventListener("click", claimRewards);
       document.getElementById("runBacktestBtn").addEventListener("click", runBacktest);
+      runBacktestCompareBtn.addEventListener("click", runBacktestCompare);
+      refreshModelsBtn.addEventListener("click", loadModelProfiles);
+      initModelsBtn.addEventListener("click", initModelProfiles);
+      trainModelBtn.addEventListener("click", trainCurrentModel);
+      newModelBtn.addEventListener("click", startNewModelDraft);
+      saveModelBtn.addEventListener("click", saveModelProfile);
       tabButtons.forEach((btn) => {
         btn.addEventListener("click", () => {
           const tab = btn.getAttribute("data-tab") || "runtime";
@@ -1128,7 +1773,26 @@
         });
       });
 
-      btTarget.addEventListener("change", syncBacktestDays);
+      btTarget.addEventListener("change", () => {
+        syncBacktestDays();
+        renderBacktestModelOptions();
+        btCompareItems = [];
+        renderBacktestCompare(btCompareItems);
+        btCompareStatus.textContent = "";
+      });
+      btPageSize.addEventListener("change", () => {
+        btQuery.pageSize = Math.max(10, Number(btPageSize.value || "100"));
+        btQuery.page = 1;
+        renderBacktestRecords();
+      });
+      btPrevBtn.addEventListener("click", () => {
+        btQuery.page = Math.max(1, btQuery.page - 1);
+        renderBacktestRecords();
+      });
+      btNextBtn.addEventListener("click", () => {
+        btQuery.page += 1;
+        renderBacktestRecords();
+      });
 
       tradeTarget.addEventListener("change", async () => {
         tradeQuery.targetId = tradeTarget.value || "";
@@ -1154,9 +1818,42 @@
         await loadTrades();
       });
 
+      modelTarget.addEventListener("change", () => {
+        const targetId = String(modelTarget.value || "").trim();
+        if (!targetId) return;
+        const picked = modelProfiles.find((p) => p.id === selectedModelProfileId);
+        if (picked && picked.targetId === targetId) return;
+        selectedModelProfileId = "";
+        fillModelEditorByTarget(targetId);
+      });
+      modelListFilter.addEventListener("change", () => {
+        modelListFilterTargetId = String(modelListFilter.value || "").trim();
+        renderModelProfiles(modelProfiles);
+      });
+      modelsBody.addEventListener("click", (e) => {
+        const el = e.target;
+        if (!(el instanceof HTMLElement)) return;
+        const btn = el.closest(".model-delete");
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const profileId = String(btn.getAttribute("data-profile-id") || "").trim();
+        void deleteModelProfile(profileId);
+      });
+      modelsBody.addEventListener("change", (e) => {
+        const el = e.target;
+        if (!(el instanceof HTMLInputElement)) return;
+        if (el.name !== "modelPick") return;
+        selectedModelProfileId = String(el.value || "");
+        const picked = modelProfiles.find((p) => p.id === selectedModelProfileId);
+        if (picked) {
+          fillModelEditor(picked);
+          modelEditorStatus.textContent = `已选中 ${picked.name || picked.id}`;
+        }
+      });
+
       (async () => {
         setActiveTab(activeTab);
         await loadConfig();
+        await loadModelProfiles();
         await loadTrades();
         await loadAccount();
         await loadLogs();

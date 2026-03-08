@@ -9,8 +9,9 @@ import { Wallet } from "ethers";
 
 import { MAX_TARGETS, loadConfig, readRuntimeConfig, writeRuntimeConfig, type RuntimeConfigFile } from "./config.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
-import { getAllowedBacktestDays, runBacktest } from "./services/backtest-service.js";
+import { getAllowedBacktestDays, runBacktestCompare, runBacktestDetailed } from "./services/backtest-service.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
+import { deleteProfile, ensureDefaultProfiles, listProfiles, trainProfile, upsertProfile } from "./services/model-lab-service.js";
 import { StateStore } from "./services/state-store.js";
 import type { LiveTradeRecord } from "./types.js";
 
@@ -383,6 +384,8 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
 
         const targetId = String(payload?.targetId || "").trim();
         const days = Number(payload?.days);
+        const profileId = String(payload?.profileId || "").trim();
+        const modelPathRaw = String(payload?.modelPath || "").trim();
         if (!targetId) {
           sendJson(res, 400, { error: "targetId is required" });
           return;
@@ -412,12 +415,200 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
           return;
         }
 
-        const result = await runBacktest(cfg, targetId, days);
+        let modelPathOverride: string | undefined;
+        if (profileId) {
+          const profiles = listProfiles(cfg);
+          const p = profiles.find((x) => x.id === profileId);
+          if (!p) {
+            sendJson(res, 404, { error: `profile not found: ${profileId}` });
+            return;
+          }
+          if (p.targetId !== targetId) {
+            sendJson(res, 400, { error: `profile ${profileId} does not belong to target ${targetId}` });
+            return;
+          }
+          modelPathOverride = p.modelPath;
+        } else if (modelPathRaw) {
+          modelPathOverride = modelPathRaw;
+        }
+
+        const out = await runBacktestDetailed(cfg, targetId, days, { modelPath: modelPathOverride });
         sendJson(res, 200, {
           ok: true,
-          result,
+          result: out.result,
+          records: out.records,
           allowedDays,
         });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/api/backtest/compare") {
+        const body = await readBody(req);
+        let payload: any;
+        try {
+          payload = JSON.parse(body || "{}");
+        } catch {
+          sendJson(res, 400, { error: "invalid JSON body" });
+          return;
+        }
+
+        const targetId = String(payload?.targetId || "").trim();
+        const days = Number(payload?.days);
+        const includeDefault = payload?.includeDefault !== false;
+        const profileIds = Array.isArray(payload?.profileIds)
+          ? payload.profileIds.map((x: unknown) => String(x || "").trim()).filter(Boolean)
+          : [];
+        if (!targetId) {
+          sendJson(res, 400, { error: "targetId is required" });
+          return;
+        }
+        if (!Number.isFinite(days) || days <= 0) {
+          sendJson(res, 400, { error: "days must be positive number" });
+          return;
+        }
+
+        const cfg = loadConfig();
+        const target = cfg.targets.find((t) => t.id === targetId);
+        if (!target) {
+          sendJson(res, 404, { error: `target not found: ${targetId}` });
+          return;
+        }
+
+        const allowedDays = getAllowedBacktestDays(target.horizonMin);
+        if (!allowedDays.length) {
+          sendJson(res, 400, { error: `${target.horizonMin}m backtest is not supported now` });
+          return;
+        }
+        if (!allowedDays.includes(days)) {
+          sendJson(res, 400, {
+            error: `invalid days=${days} for ${target.horizonMin}m`,
+            allowedDays,
+          });
+          return;
+        }
+
+        const allProfiles = listProfiles(cfg).filter((x) => x.targetId === targetId);
+        const profileSet = new Set(profileIds);
+        const pickedProfiles = profileSet.size > 0
+          ? allProfiles.filter((x) => profileSet.has(x.id))
+          : allProfiles;
+
+        const defaultModelPath = String(target.modelPath || cfg.trainedModelPath || "").trim();
+        const candidates: Array<{ profileId: string; modelName: string; modelPath: string }> = [];
+        if (includeDefault && defaultModelPath) {
+          candidates.push({
+            profileId: "__default__",
+            modelName: `默认模型(${target.id})`,
+            modelPath: defaultModelPath,
+          });
+        }
+        for (const p of pickedProfiles) {
+          candidates.push({
+            profileId: p.id,
+            modelName: p.name || p.id,
+            modelPath: p.modelPath,
+          });
+        }
+        if (!candidates.length) {
+          sendJson(res, 400, { error: "no model candidates for compare" });
+          return;
+        }
+
+        const out = await runBacktestCompare(cfg, targetId, days, candidates);
+        sendJson(res, 200, {
+          ok: true,
+          ...out,
+          allowedDays,
+        });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/api/models/profiles") {
+        const cfg = loadConfig();
+        const profiles = listProfiles(cfg);
+        sendJson(res, 200, { profiles });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/api/models/init") {
+        const cfg = loadConfig();
+        const profiles = ensureDefaultProfiles(cfg);
+        sendJson(res, 200, { ok: true, profiles });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/api/models/profile") {
+        const body = await readBody(req);
+        let payload: any;
+        try {
+          payload = JSON.parse(body || "{}");
+        } catch {
+          sendJson(res, 400, { error: "invalid JSON body" });
+          return;
+        }
+        const targetId = String(payload?.targetId || "").trim();
+        if (!targetId) {
+          sendJson(res, 400, { error: "targetId is required" });
+          return;
+        }
+        const cfg = loadConfig();
+        const profile = upsertProfile(cfg, {
+          id: payload?.id,
+          targetId,
+          name: payload?.name,
+          trainDays: payload?.trainDays,
+          lookbackMin: payload?.lookbackMin,
+          stepMin: payload?.stepMin,
+          valDays: payload?.valDays,
+          epochs: payload?.epochs,
+          learningRate: payload?.learningRate,
+          l2: payload?.l2,
+          patience: payload?.patience,
+          modelPath: payload?.modelPath,
+        });
+        sendJson(res, 200, { ok: true, profile });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/api/models/train") {
+        const body = await readBody(req);
+        let payload: any;
+        try {
+          payload = JSON.parse(body || "{}");
+        } catch {
+          sendJson(res, 400, { error: "invalid JSON body" });
+          return;
+        }
+        const profileId = String(payload?.profileId || "").trim();
+        if (!profileId) {
+          sendJson(res, 400, { error: "profileId is required" });
+          return;
+        }
+        const cfg = loadConfig();
+        const profile = await trainProfile(cfg, profileId);
+        sendJson(res, 200, { ok: true, profile });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/api/models/delete") {
+        const body = await readBody(req);
+        let payload: any;
+        try {
+          payload = JSON.parse(body || "{}");
+        } catch {
+          sendJson(res, 400, { error: "invalid JSON body" });
+          return;
+        }
+        const profileId = String(payload?.profileId || "").trim();
+        const deleteModelFile = payload?.deleteModelFile !== false;
+        if (!profileId) {
+          sendJson(res, 400, { error: "profileId is required" });
+          return;
+        }
+        const cfg = loadConfig();
+        const deleted = deleteProfile(cfg, profileId, { deleteModelFile });
+        const profiles = listProfiles(cfg);
+        sendJson(res, 200, { ok: true, deleted, profiles });
         return;
       }
 

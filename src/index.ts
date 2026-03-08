@@ -815,7 +815,7 @@ export async function startBot(): Promise<void> {
 
       const openTrades = state.getOpenTradeCount(perfMode);
       const tradesToday = state.getTradeCountSince(startOfLocalDayIso(), perfMode);
-      const consecutiveLosses = state.getConsecutiveLosses(perfMode);
+      const consecutiveLosses = state.getConsecutiveLossesSince(sessionStartedAt, perfMode);
 
       if (cfg.maxConsecutiveLosses > 0 && consecutiveLosses >= cfg.maxConsecutiveLosses) {
         log("risk stop triggered: max consecutive losses reached", {

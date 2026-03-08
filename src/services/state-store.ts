@@ -183,6 +183,25 @@ export class StateStore {
     return losses;
   }
 
+  getConsecutiveLossesSince(startTime: string, mode: TradeModeFilter = "ALL"): number {
+    const startMs = Date.parse(startTime);
+    if (!Number.isFinite(startMs)) return 0;
+    const state = this.load();
+    const trades = (state.trades ?? []).filter((x) => {
+      if (!this.matchesMode(x, mode)) return false;
+      const t = Date.parse(x.entryTime);
+      return Number.isFinite(t) && t >= startMs;
+    });
+    let losses = 0;
+    for (let i = trades.length - 1; i >= 0; i -= 1) {
+      const t = trades[i];
+      if (!t.resolved) continue;
+      if (t.win) break;
+      losses += 1;
+    }
+    return losses;
+  }
+
   private summarize(trades: LiveTradeRecord[]): {
     totalTrades: number;
     settledTrades: number;

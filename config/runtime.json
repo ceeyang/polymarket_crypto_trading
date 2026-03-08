@@ -12,7 +12,7 @@
   "prediction": {
     "lookbackMinutes": 120,
     "trainedModelPath": "state/models/eth_5m_logreg.json",
-    "minEdge": 0.025,
+    "minEdge": 0.02,
     "baseBetUsd": 1.5,
     "maxBetUsd": 2.5,
     "minOrderShares": 5,

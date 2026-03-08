@@ -177,15 +177,50 @@ async function fetchKlinesRange(symbol: string, startMs: number, endMs: number):
 }
 
 function buildSamples(candles: Candle[], lookback: number, horizonMin: number, stepMin: number, startMs: number, endMs: number): Sample[] {
+  const minuteMs = 60_000;
+  const horizonMs = Math.max(1, horizonMin) * minuteMs;
+  const timeStepMin = Math.max(1, Math.floor(stepMin));
+  const endAlignedMs = Math.floor(endMs / horizonMs) * horizonMs;
+  const rowByTime = new Map<number, Candle>();
+  const idxByTime = new Map<number, number>();
+  for (let i = 0; i < candles.length; i += 1) {
+    rowByTime.set(candles[i].openTime, candles[i]);
+    idxByTime.set(candles[i].openTime, i);
+  }
+
+  const gapPrefix = new Array(candles.length + 1).fill(0);
+  for (let i = 1; i < candles.length; i += 1) {
+    const gap = candles[i].openTime - candles[i - 1].openTime !== minuteMs ? 1 : 0;
+    gapPrefix[i + 1] = gapPrefix[i] + gap;
+  }
+  const isContinuous = (startIdx: number, endIdx: number): boolean => {
+    if (startIdx < 0 || endIdx <= startIdx) return false;
+    return gapPrefix[endIdx + 1] - gapPrefix[startIdx + 1] === 0;
+  };
+
   const samples: Sample[] = [];
-  for (let i = lookback - 1; i + horizonMin < candles.length; i += stepMin) {
+  for (let i = lookback - 1; i + horizonMin < candles.length; i += 1) {
     const entry = candles[i];
-    if (entry.openTime < startMs || entry.openTime > endMs) continue;
+    if (entry.openTime < startMs || entry.openTime > endAlignedMs) continue;
+    // Polymarket 5m/15m 窗口按 epoch 固定边界对齐（如 xx:00~xx:05, xx:05~xx:10）。
+    if (entry.openTime % horizonMs !== 0) continue;
+    // 训练下采样改为“按时间取模”，避免索引步长与边界错位导致漏样本。
+    if ((Math.floor(entry.openTime / minuteMs) % timeStepMin) !== 0) continue;
+
+    const futureTime = entry.openTime + horizonMs;
+    const future = rowByTime.get(futureTime);
+    const futureIdx = idxByTime.get(futureTime);
+    if (!future || futureIdx == null) continue;
+
+    const startIdx = i - lookback + 1;
+    if (!isContinuous(startIdx, i)) continue;
+    if (!isContinuous(i, futureIdx)) continue;
+
     const window = candles.slice(i - lookback + 1, i + 1).map((c) => c.close);
     const x = buildFeatureVector(window);
     if (!x) continue;
-    const future = candles[i + horizonMin];
-    const y = future.close > entry.close ? 1 : 0;
+    // 与 Polymarket Up/Down 规则一致：end >= start => UP。
+    const y = future.close >= entry.close ? 1 : 0;
     samples.push({ timeMs: entry.openTime, x, y });
   }
   return samples;
