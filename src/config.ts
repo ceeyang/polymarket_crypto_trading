@@ -21,11 +21,14 @@ export interface TrainingConfig {
 export interface Config {
   dryRun: boolean;
   pollIntervalSec: number;
+  autoClaim: boolean;
+  claimCooldownSec: number;
   lookbackMinutes: number;
   trainedModelPath: string;
   minEdge: number;
   baseBetUsd: number;
   maxBetUsd: number;
+  minOrderShares: number;
   priceAggression: number;
   minMarketLiquidity: number;
   minTimeToExpiryMin: number;
@@ -57,6 +60,8 @@ interface RuntimeFile {
   runtime: {
     dryRun: boolean;
     pollIntervalSec: number;
+    autoClaim?: boolean;
+    claimCooldownSec?: number;
   };
   prediction: {
     lookbackMinutes: number;
@@ -64,6 +69,7 @@ interface RuntimeFile {
     minEdge: number;
     baseBetUsd: number;
     maxBetUsd: number;
+    minOrderShares?: number;
     priceAggression: number;
   };
   marketFilter: {
@@ -92,6 +98,18 @@ function parseSignatureType(raw: string | undefined, fallback: number): number {
   const n = Number(raw);
   if (n === 0 || n === 1 || n === 2) return n;
   return fallback;
+}
+
+function parsePositiveInt(raw: unknown, fallback: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+function parsePositiveNumber(raw: unknown, fallback: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n;
 }
 
 function normalizeRelayerTxType(raw: string | undefined): "SAFE" | "PROXY" | null {
@@ -128,15 +146,21 @@ export function loadConfig(): Config {
   const relayerTxType = relayerTxTypeFromEnv
     ?? relayerTxTypeFromRuntime
     ?? (signatureType === 2 ? "SAFE" : "PROXY");
+  const autoClaim = rc.runtime.autoClaim ?? true;
+  const claimCooldownSec = parsePositiveInt(rc.runtime.claimCooldownSec, 300);
+  const minOrderShares = parsePositiveNumber(rc.prediction.minOrderShares, 5);
 
   return {
     dryRun: rc.runtime.dryRun,
     pollIntervalSec: rc.runtime.pollIntervalSec,
+    autoClaim,
+    claimCooldownSec,
     lookbackMinutes: rc.prediction.lookbackMinutes,
     trainedModelPath: rc.prediction.trainedModelPath,
     minEdge: rc.prediction.minEdge,
     baseBetUsd: rc.prediction.baseBetUsd,
     maxBetUsd: rc.prediction.maxBetUsd,
+    minOrderShares,
     priceAggression: rc.prediction.priceAggression,
     minMarketLiquidity: rc.marketFilter.minMarketLiquidity,
     minTimeToExpiryMin: rc.marketFilter.minTimeToExpiryMin,

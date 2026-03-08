@@ -1,21 +1,24 @@
 {
   "runtime": {
-    "dryRun": true,
-    "pollIntervalSec": 30
+    "dryRun": false,
+    "pollIntervalSec": 20,
+    "autoClaim": true,
+    "claimCooldownSec": 300
   },
   "prediction": {
     "lookbackMinutes": 120,
     "trainedModelPath": "state/models/eth_5m_logreg.json",
-    "minEdge": 0.03,
-    "baseBetUsd": 10,
-    "maxBetUsd": 30,
+    "minEdge": 0.02,
+    "baseBetUsd": 1.5,
+    "maxBetUsd": 2.6,
+    "minOrderShares": 5,
     "priceAggression": 0.01
   },
   "marketFilter": {
-    "minMarketLiquidity": 500,
+    "minMarketLiquidity": 300,
     "minTimeToExpiryMin": 1,
-    "maxTimeToExpiryMin": 25,
-    "cooldownSeconds": 60
+    "maxTimeToExpiryMin": 30,
+    "cooldownSeconds": 20
   },
   "network": {
     "polyHost": "https://clob.polymarket.com",

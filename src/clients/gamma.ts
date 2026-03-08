@@ -56,7 +56,11 @@ export class GammaClient {
     return { total: markets.length, ethMatched, eth5mMatched };
   }
 
-  selectBestEth5mMarket(markets: GammaMarket[], now = new Date()): SelectedMarket | null {
+  selectBestEth5mMarket(
+    markets: GammaMarket[],
+    now = new Date(),
+    excludedMarketIds?: Set<string>,
+  ): SelectedMarket | null {
     const strictCandidates: SelectedMarket[] = [];
     const relaxedCandidates: SelectedMarket[] = [];
 
@@ -70,6 +74,7 @@ export class GammaClient {
 
       const endDate = this.getEndDate(m);
       if (!endDate) continue;
+      if (!this.isCurrentFiveMinuteWindow(m, endDate, now)) continue;
 
       const minsLeft = minutesUntil(endDate, now);
       if (minsLeft <= 0) continue;
@@ -123,6 +128,8 @@ export class GammaClient {
         negRisk: Boolean(m.negRisk),
         score,
       };
+
+      if (excludedMarketIds?.has(candidate.marketId)) continue;
 
       const isStrict =
         minsLeft >= this.config.minTimeToExpiryMin &&
@@ -285,5 +292,39 @@ export class GammaClient {
       if (typeof c === "string" && c.trim().length > 0) return c;
     }
     return null;
+  }
+
+  private getStartDate(m: GammaMarket): string | null {
+    const candidates = [
+      m.startDate,
+      m.start_date_iso,
+      m.startTime,
+      m.openTime,
+      m.gameStartTime,
+    ];
+    for (const c of candidates) {
+      if (typeof c === "string" && c.trim().length > 0) return c;
+    }
+    return null;
+  }
+
+  private isCurrentFiveMinuteWindow(m: GammaMarket, endDate: string, now: Date): boolean {
+    const endMs = Date.parse(endDate);
+    if (!Number.isFinite(endMs)) return false;
+
+    const nowMs = now.getTime();
+    if (nowMs >= endMs) return false;
+
+    const startDate = this.getStartDate(m);
+    if (startDate) {
+      const startMs = Date.parse(startDate);
+      if (Number.isFinite(startMs)) {
+        return nowMs >= startMs && nowMs < endMs;
+      }
+    }
+
+    // Fallback when start time is absent: treat markets ending within ~6 minutes as current window.
+    const minsLeft = (endMs - nowMs) / 60000;
+    return minsLeft > 0 && minsLeft <= 6;
   }
 }

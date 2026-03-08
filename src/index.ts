@@ -4,6 +4,7 @@ import { GammaClient } from "./clients/gamma.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
 import { makeDecision } from "./strategy/decision.js";
 import { loadTrainedModel, predictWithTrainedModel } from "./strategy/trained-model.js";
+import { claimRedeemablePositions } from "./services/claim-service.js";
 import { StateStore } from "./services/state-store.js";
 import { sleep } from "./utils.js";
 
@@ -22,12 +23,16 @@ async function run(): Promise<void> {
   const binance = new BinanceClient();
   const trader = await PolymarketTrader.create(cfg);
   const state = new StateStore();
+  const sessionStartedAt = new Date().toISOString();
+  let lastAutoClaimAtMs = 0;
   const trainedModel = loadTrainedModel(cfg.trainedModelPath);
   if (!trainedModel) {
     throw new Error(`Trained model is required but not found/invalid: ${cfg.trainedModelPath}`);
   }
 
   log(`bot started dryRun=${cfg.dryRun} interval=${cfg.pollIntervalSec}s`);
+  log(`session started at ${sessionStartedAt}`);
+  log(`auto claim enabled=${cfg.autoClaim} cooldown=${cfg.claimCooldownSec}s`);
   log(`trained model loaded: ${cfg.trainedModelPath}`, trainedModel.metrics ?? {});
 
   while (true) {
@@ -38,12 +43,30 @@ async function run(): Promise<void> {
         return binance.getCloseNearTime("ETHUSDT", settleMs);
       });
 
+      if (cfg.autoClaim && !cfg.dryRun) {
+        const nowMs = Date.now();
+        if (nowMs - lastAutoClaimAtMs >= cfg.claimCooldownSec * 1000) {
+          try {
+            const claimSummary = await claimRedeemablePositions(cfg, { logPrefix: "[auto-claim]" });
+            log("auto claim result", claimSummary);
+          } catch (err) {
+            log("auto claim error", err instanceof Error ? err.message : err);
+          } finally {
+            lastAutoClaimAtMs = nowMs;
+          }
+        }
+      }
+
       const markets = await gamma.getCandidateMarkets(500);
-      const best = gamma.selectBestEth5mMarket(markets);
+      const tradedMarketIds = state.getTradedMarketIds();
+      const best = gamma.selectBestEth5mMarket(markets, new Date(), tradedMarketIds);
 
       if (!best) {
         const stats = gamma.getScanStats(markets);
-        log("no eligible ETH short-horizon market found", stats);
+        log("no eligible ETH short-horizon market found", {
+          ...stats,
+          excludedByTraded: tradedMarketIds.size,
+        });
         continue;
       }
 
@@ -56,11 +79,6 @@ async function run(): Promise<void> {
         liquidity: best.liquidity,
         score: best.score,
       });
-
-      if (state.hasTraded(best.marketId)) {
-        log(`skip: market already traded marketId=${best.marketId}`);
-        continue;
-      }
 
       if (!state.canTradeByCooldown(cfg.cooldownSeconds)) {
         log(`skip: cooldown active (${cfg.cooldownSeconds}s)`);
@@ -76,6 +94,16 @@ async function run(): Promise<void> {
 
       log("prediction", pred);
       log("decision", decision);
+
+      const minsToEnd = (Date.parse(best.endDate) - Date.now()) / 60000;
+      if (!Number.isFinite(minsToEnd) || minsToEnd <= 0 || minsToEnd > 6) {
+        log("skip: not current 5m window market", {
+          marketId: best.marketId,
+          endDate: best.endDate,
+          minsToEnd: Number(minsToEnd.toFixed(3)),
+        });
+        continue;
+      }
 
       if (decision.action === "SKIP" || !decision.side || !decision.tokenId || !decision.limitPrice || !decision.shareSize) {
         continue;
@@ -102,12 +130,17 @@ async function run(): Promise<void> {
     } catch (err) {
       log("loop error", err instanceof Error ? err.message : err);
     } finally {
-      const perf = state.getPerformanceSummary();
+      const perfAll = state.getPerformanceSummary();
+      const perfSession = state.getPerformanceSummarySince(sessionStartedAt);
       log("round summary", {
-        totalTrades: perf.totalTrades,
-        settledTrades: perf.settledTrades,
-        wins: perf.wins,
-        winRate: Number((perf.winRate * 100).toFixed(2)),
+        totalTrades: perfAll.totalTrades,
+        settledTrades: perfAll.settledTrades,
+        wins: perfAll.wins,
+        winRate: Number((perfAll.winRate * 100).toFixed(2)),
+        sessionTrades: perfSession.totalTrades,
+        sessionSettledTrades: perfSession.settledTrades,
+        sessionWins: perfSession.wins,
+        sessionWinRate: Number((perfSession.winRate * 100).toFixed(2)),
       });
 
       await sleep(cfg.pollIntervalSec * 1000);

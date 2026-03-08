@@ -8,9 +8,7 @@ export function makeDecision(pred: Prediction, market: SelectedMarket, cfg: Conf
 
   const edgeYes = pUp - market.yesPrice;
   const edgeNo = pDown - market.noPrice;
-
-  const chooseYes = edgeYes >= edgeNo;
-  const bestEdge = chooseYes ? edgeYes : edgeNo;
+  const bestEdge = Math.max(edgeYes, edgeNo);
 
   if (bestEdge < cfg.minEdge) {
     return {
@@ -20,27 +18,41 @@ export function makeDecision(pred: Prediction, market: SelectedMarket, cfg: Conf
     };
   }
 
-  const side = chooseYes ? "YES" : "NO";
-  const tokenId = chooseYes ? market.yesTokenId : market.noTokenId;
-  const marketPrice = chooseYes ? market.yesPrice : market.noPrice;
+  const candidates = [
+    { side: "YES" as const, tokenId: market.yesTokenId, marketPrice: market.yesPrice, edge: edgeYes },
+    { side: "NO" as const, tokenId: market.noTokenId, marketPrice: market.noPrice, edge: edgeNo },
+  ].sort((a, b) => b.edge - a.edge);
 
-  const usdSize = clamp(
-    cfg.baseBetUsd * (bestEdge / cfg.minEdge),
-    cfg.baseBetUsd,
-    cfg.maxBetUsd,
-  );
+  for (const c of candidates) {
+    if (c.edge < cfg.minEdge) continue;
 
-  const limitPrice = clamp(marketPrice + cfg.priceAggression, 0.01, 0.99);
-  const shareSize = usdSize / limitPrice;
+    const limitPrice = clamp(c.marketPrice + cfg.priceAggression, 0.01, 0.99);
+    const desiredUsd = clamp(
+      cfg.baseBetUsd * (c.edge / cfg.minEdge),
+      cfg.baseBetUsd,
+      cfg.maxBetUsd,
+    );
+    const minUsdForShares = cfg.minOrderShares * limitPrice;
+    const usdSize = Math.max(desiredUsd, minUsdForShares);
+
+    if (usdSize > cfg.maxBetUsd) continue;
+
+    const shareSize = usdSize / limitPrice;
+    return {
+      action: "BUY",
+      reason: `edge=${c.edge.toFixed(4)} side=${c.side} marketPrice=${c.marketPrice.toFixed(4)} predUp=${pUp.toFixed(4)}`,
+      side: c.side,
+      tokenId: c.tokenId,
+      limitPrice,
+      usdSize,
+      shareSize,
+      edge: c.edge,
+    };
+  }
 
   return {
-    action: "BUY",
-    reason: `edge=${bestEdge.toFixed(4)} side=${side} marketPrice=${marketPrice.toFixed(4)} predUp=${pUp.toFixed(4)}`,
-    side,
-    tokenId,
-    limitPrice,
-    usdSize,
-    shareSize,
+    action: "SKIP",
+    reason: `min shares unmet under max bet (max=${cfg.maxBetUsd.toFixed(4)} minShares=${cfg.minOrderShares.toFixed(2)})`,
     edge: bestEdge,
   };
 }

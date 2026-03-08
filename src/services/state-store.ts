@@ -37,6 +37,11 @@ export class StateStore {
     return Boolean(state.tradedMarkets[marketId]);
   }
 
+  getTradedMarketIds(): Set<string> {
+    const state = this.load();
+    return new Set(Object.keys(state.tradedMarkets ?? {}));
+  }
+
   recordTrade(trade: LiveTradeRecord): void {
     const state = this.load();
     state.tradedMarkets[trade.marketId] = isoNow();
@@ -93,6 +98,31 @@ export class StateStore {
   } {
     const state = this.load();
     const trades = state.trades ?? [];
+    return this.summarize(trades);
+  }
+
+  getPerformanceSummarySince(startTime: string): {
+    totalTrades: number;
+    settledTrades: number;
+    wins: number;
+    winRate: number;
+  } {
+    const startMs = Date.parse(startTime);
+    const state = this.load();
+    const trades = (state.trades ?? []).filter((x) => {
+      const t = Date.parse(x.entryTime);
+      if (!Number.isFinite(startMs) || !Number.isFinite(t)) return false;
+      return t >= startMs;
+    });
+    return this.summarize(trades);
+  }
+
+  private summarize(trades: LiveTradeRecord[]): {
+    totalTrades: number;
+    settledTrades: number;
+    wins: number;
+    winRate: number;
+  } {
     const settled = trades.filter((x) => x.resolved);
     const wins = settled.filter((x) => x.win).length;
     return {

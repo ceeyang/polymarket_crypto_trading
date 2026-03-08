@@ -67,6 +67,7 @@ pnpm run train:model
 - `pnpm run balance`：查询账户余额、仓位和可领取仓位
 - `pnpm run claim`：通过官方 relayer 执行 `redeemPositions`（支持 Proxy/Safe 路径）
 - 仅领取指定 conditionId：`pnpm run claim -- <conditionId1> <conditionId2>`
+- 机器人循环内可自动领取：`runtime.autoClaim=true`，并通过 `runtime.claimCooldownSec` 控制间隔
 
 ## 轮次统计
 
@@ -83,8 +84,9 @@ pnpm run train:model
 
 关键参数示例（`config/runtime.json`）：
 - `runtime.dryRun`
+- `runtime.autoClaim / runtime.claimCooldownSec`
 - `prediction.trainedModelPath`
-- `prediction.minEdge / baseBetUsd / maxBetUsd`
+- `prediction.minEdge / baseBetUsd / maxBetUsd / minOrderShares`
 - `network.signatureType / chainId / rpcUrl / usdcAddress / ctfAddress`
   - 可选：`network.rpcUrls`（数组），`claim` 会自动探测并切换到可用节点
   - `network.relayerHost`
