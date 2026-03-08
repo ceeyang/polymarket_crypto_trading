@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "dryRun": false,
+    "dryRun": true,
     "pollIntervalSec": 20,
     "autoClaim": true,
     "claimCooldownSec": 300,

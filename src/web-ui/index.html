@@ -5,50 +5,117 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Polymarket Bot Dashboard</title>
     <style>
+      @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
+
       :root {
-        --bg: #f4f7fb;
-        --card: #ffffff;
-        --text: #101828;
-        --muted: #667085;
-        --border: #d0d5dd;
-        --primary: #0b63f6;
+        --bg-0: #f4f8f4;
+        --bg-1: #eef5ff;
+        --bg-2: #f9fcff;
+        --card: rgba(255, 255, 255, 0.88);
+        --card-strong: #ffffff;
+        --text: #0f1c2f;
+        --muted: #58677f;
+        --border: #d4dde9;
+        --primary: #0f766e;
+        --primary-2: #1d4ed8;
+        --danger: #b42318;
+        --success: #067647;
+        --warn: #b54708;
+        --shadow: 0 8px 30px rgba(15, 28, 47, 0.08);
       }
       body {
         margin: 0;
-        background: radial-gradient(circle at 20% 0%, #e9f0ff 0%, #f8fbff 35%, #eef8ef 100%);
+        background:
+          radial-gradient(circle at 0% 0%, rgba(29, 78, 216, 0.08), transparent 42%),
+          radial-gradient(circle at 100% 0%, rgba(15, 118, 110, 0.08), transparent 38%),
+          linear-gradient(165deg, var(--bg-0) 0%, var(--bg-1) 48%, var(--bg-2) 100%);
         color: var(--text);
-        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+        line-height: 1.5;
       }
       .wrap {
-        max-width: 1240px;
-        margin: 22px auto;
-        padding: 0 14px;
+        max-width: 1360px;
+        margin: 24px auto 32px;
+        padding: 0 16px;
+        box-sizing: border-box;
       }
       .grid {
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
+        display: block;
       }
       .card {
         background: var(--card);
+        backdrop-filter: blur(8px);
         border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 14px;
+        border-radius: 18px;
+        padding: 16px;
         width: 100%;
         box-sizing: border-box;
         overflow: hidden;
+        box-shadow: var(--shadow);
+        animation: rise 220ms ease-out both;
+      }
+      .card:nth-child(2) {
+        animation-delay: 60ms;
+      }
+      .card:nth-child(3) {
+        animation-delay: 110ms;
+      }
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      h1,
+      h2 {
+        font-family: "Space Grotesk", "Plus Jakarta Sans", sans-serif;
+        letter-spacing: 0.01em;
       }
       h1 {
-        margin: 0 0 8px;
-        font-size: 22px;
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.15;
       }
       h2 {
         margin: 0 0 8px;
-        font-size: 16px;
+        font-size: 18px;
+      }
+      code {
+        background: #ecf2ff;
+        border: 1px solid #dce7ff;
+        border-radius: 6px;
+        padding: 1px 6px;
+        font-size: 12px;
       }
       .muted {
         color: var(--muted);
         font-size: 13px;
+      }
+      .hero {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 14px;
+        margin-bottom: 12px;
+      }
+      .hero-meta {
+        flex: 1;
+        min-width: 240px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid #ced8ea;
+        background: #f7fbff;
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 12px;
+        color: #325271;
+        gap: 8px;
       }
       .row {
         display: flex;
@@ -58,15 +125,15 @@
       }
       .form-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(180px, 1fr));
-        gap: 10px;
+        grid-template-columns: repeat(3, minmax(195px, 1fr));
+        gap: 11px;
         margin: 12px 0;
       }
       .field {
         border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 8px;
-        background: #fbfdff;
+        border-radius: 12px;
+        padding: 9px 10px;
+        background: #f8fbff;
       }
       .field label {
         display: block;
@@ -79,15 +146,27 @@
         width: 100%;
         border: 1px solid var(--border);
         border-radius: 8px;
-        padding: 7px 8px;
+        padding: 9px 10px;
         font-size: 13px;
         box-sizing: border-box;
+        background: #fff;
+      }
+      .field input:focus,
+      .select:focus,
+      button:focus-visible,
+      .target-item input:focus-visible {
+        outline: 2px solid #7fb5ff;
+        outline-offset: 1px;
       }
       .toggle {
         display: flex;
         align-items: center;
         gap: 8px;
         font-size: 13px;
+        background: #f7fbff;
+        border: 1px solid #d6e0ef;
+        border-radius: 999px;
+        padding: 6px 12px;
       }
       table {
         width: 100%;
@@ -97,38 +176,69 @@
       }
       th,
       td {
-        border-bottom: 1px solid #e9edf5;
+        border-bottom: 1px solid #e7edf7;
         text-align: left;
-        padding: 8px 6px;
+        padding: 9px 8px;
       }
       th {
-        color: var(--muted);
+        color: #526178;
         font-weight: 600;
         font-size: 12px;
       }
       button {
-        border: 0;
-        border-radius: 8px;
-        background: var(--primary);
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: linear-gradient(90deg, var(--primary), var(--primary-2));
         color: #fff;
-        padding: 8px 12px;
+        padding: 10px 13px;
         font-weight: 600;
+        min-height: 40px;
         cursor: pointer;
+        transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+      }
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(15, 118, 110, 0.24);
+      }
+      button:active {
+        transform: translateY(0);
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+      #loadBtn,
+      #refreshLogBtn,
+      #refreshTradesBtn,
+      #refreshBalanceBtn,
+      #tradePrevBtn,
+      #tradeNextBtn {
+        background: #ffffff;
+        border-color: #ccd8eb;
+        color: #355173;
+      }
+      #clearLogBtn,
+      #clearTradesBtn {
+        background: #fff5f5;
+        border-color: #f1caca;
+        color: var(--danger);
       }
       pre {
         margin: 0;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 10px;
-        height: min(52vh, 640px);
+        border: 1px solid #dbe5f4;
+        border-radius: 12px;
+        padding: 12px;
+        height: min(48vh, 580px);
         width: 100%;
         max-width: 100%;
         box-sizing: border-box;
         overflow: auto;
-        background: #f8fbff;
+        background: #f4f8ff;
         font-family: "SFMono-Regular", Menlo, Consolas, monospace;
         font-size: 12px;
-        white-space: pre;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
       .table-wrap {
         width: 100%;
@@ -145,9 +255,9 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 7px 9px;
+        border: 1px solid #d8e2f1;
+        border-radius: 10px;
+        padding: 8px 10px;
         background: #fbfdff;
         font-size: 13px;
       }
@@ -156,14 +266,53 @@
         max-width: 100%;
         overflow-x: auto;
       }
+      .log-card {
+        grid-column: 1 / -1;
+      }
+      .tabbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 6px 0 14px;
+      }
+      .tab-btn {
+        min-height: 40px;
+        border-radius: 999px;
+        padding: 8px 14px;
+        border: 1px solid #cad6ea;
+        background: #ffffff;
+        color: #2e4b6e;
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .tab-btn.active {
+        color: #fff;
+        border-color: transparent;
+        background: linear-gradient(90deg, var(--primary), var(--primary-2));
+      }
+      .module-panel {
+        display: none;
+      }
+      .module-panel.active {
+        display: block;
+      }
+      .module-panel + .module-panel {
+        margin-top: 14px;
+      }
+      .placeholder {
+        border: 1px dashed #b8c7de;
+        border-radius: 12px;
+        padding: 18px;
+        background: #f8fbff;
+      }
       .chip {
         display: inline-block;
         font-size: 12px;
         color: #0f172a;
         padding: 2px 8px;
         border-radius: 999px;
-        border: 1px solid #dbe4f5;
-        background: #f6f9ff;
+        border: 1px solid #d6deed;
+        background: #f2f7ff;
       }
       .stats-grid {
         display: grid;
@@ -172,10 +321,10 @@
         margin: 10px 0 12px;
       }
       .stat {
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 8px;
-        background: #fbfdff;
+        border: 1px solid #d8e2f2;
+        border-radius: 12px;
+        padding: 10px;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
       }
       .stat .label {
         color: var(--muted);
@@ -189,26 +338,26 @@
       .badge {
         display: inline-block;
         border-radius: 999px;
-        padding: 2px 8px;
+        padding: 3px 8px;
         font-size: 12px;
         font-weight: 600;
       }
       .badge.win {
-        color: #065f46;
-        background: #d1fae5;
+        color: var(--success);
+        background: #d9fbe8;
       }
       .badge.lose {
-        color: #991b1b;
-        background: #fee2e2;
+        color: var(--danger);
+        background: #fee4e2;
       }
       .badge.pending {
-        color: #92400e;
-        background: #fef3c7;
+        color: var(--warn);
+        background: #ffefc6;
       }
       .select {
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 6px 8px;
+        border-radius: 10px;
+        padding: 8px 10px;
         background: #fff;
       }
       @media (max-width: 1050px) {
@@ -223,6 +372,10 @@
         }
       }
       @media (max-width: 640px) {
+        .hero {
+          flex-direction: column;
+          align-items: flex-start;
+        }
         .form-grid {
           grid-template-columns: 1fr;
         }
@@ -233,19 +386,37 @@
           grid-template-columns: repeat(2, minmax(120px, 1fr));
         }
       }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <h1>Polymarket 多盘口机器人控制台</h1>
-      <div class="muted">保存后会写入 <code>config/runtime.json</code>，并通知 bot 在下一轮自动热重载。</div>
-      <div class="row" style="margin: 8px 0 0">
+      <div class="hero">
+        <div class="hero-meta">
+          <h1>Polymarket 多盘口机器人控制台</h1>
+          <div class="muted">保存后会写入 <code>config/runtime.json</code>，并通知 bot 在下一轮自动热重载。</div>
+        </div>
+        <div class="pill">Live Runtime + Risk Guard</div>
+      </div>
+      <div class="row" style="margin: 8px 0 12px">
         <button id="refreshBalanceBtn">刷新余额</button>
         <span id="balanceInfo" class="muted">余额加载中...</span>
       </div>
 
+      <div class="tabbar" role="tablist" aria-label="模块切换">
+        <button class="tab-btn active" id="tabRuntime" data-tab="runtime" role="tab" aria-selected="true">运行配置</button>
+        <button class="tab-btn" id="tabTrades" data-tab="trades" role="tab" aria-selected="false">交易记录</button>
+        <button class="tab-btn" id="tabLogs" data-tab="logs" role="tab" aria-selected="false">运行日志</button>
+        <button class="tab-btn" id="tabBacktest" data-tab="backtest" role="tab" aria-selected="false">回测模块</button>
+      </div>
+
       <div class="grid">
-        <section class="card">
+        <section class="card config-card module-panel active" data-module="runtime" role="tabpanel">
           <h2>运行与风控配置</h2>
           <div class="row" style="margin-bottom: 10px">
             <button id="loadBtn">刷新配置</button>
@@ -348,7 +519,7 @@
           </div>
         </section>
 
-        <section class="card">
+        <section class="card trade-card module-panel" data-module="trades" role="tabpanel">
           <h2>交易表现</h2>
           <div class="row" style="margin-bottom: 8px">
             <button id="refreshTradesBtn">刷新交易</button>
@@ -405,7 +576,7 @@
           </div>
         </section>
 
-        <section class="card">
+        <section class="card log-card module-panel" data-module="logs" role="tabpanel">
           <h2>运行日志</h2>
           <div class="row" style="margin-bottom: 8px">
             <button id="refreshLogBtn">刷新日志</button>
@@ -416,6 +587,17 @@
           </div>
           <div class="log-wrap">
             <pre id="logArea"></pre>
+          </div>
+        </section>
+
+        <section class="card module-panel" data-module="backtest" role="tabpanel">
+          <h2>回测模块（预留）</h2>
+          <div class="placeholder">
+            <div style="font-weight:700; margin-bottom:6px;">即将接入</div>
+            <div class="muted">
+              这里将用于配置回测区间、策略参数、运行回测任务与展示收益曲线/回撤/胜率。
+              当前已预留 Tab 与布局结构，后续可直接接 API。
+            </div>
           </div>
         </section>
       </div>
@@ -441,6 +623,9 @@
       const tradePrevBtn = document.getElementById("tradePrevBtn");
       const tradeNextBtn = document.getElementById("tradeNextBtn");
       const tradePageInfo = document.getElementById("tradePageInfo");
+      const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
+      const modulePanels = Array.from(document.querySelectorAll(".module-panel"));
+      let activeTab = "runtime";
 
       const num = (id, fallback) => {
         const v = Number(document.getElementById(id).value);
@@ -464,6 +649,19 @@
         if (Number.isNaN(t.getTime())) return String(iso);
         return t.toLocaleString();
       };
+
+      function setActiveTab(tab) {
+        activeTab = tab;
+        tabButtons.forEach((btn) => {
+          const on = btn.getAttribute("data-tab") === tab;
+          btn.classList.toggle("active", on);
+          btn.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        modulePanels.forEach((panel) => {
+          const on = panel.getAttribute("data-module") === tab;
+          panel.classList.toggle("active", on);
+        });
+      }
 
       function renderTargets(targets) {
         targetsList.innerHTML = "";
@@ -736,6 +934,12 @@
       document.getElementById("refreshTradesBtn").addEventListener("click", loadTrades);
       document.getElementById("clearTradesBtn").addEventListener("click", clearTrades);
       document.getElementById("refreshBalanceBtn").addEventListener("click", loadAccount);
+      tabButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const tab = btn.getAttribute("data-tab") || "runtime";
+          setActiveTab(tab);
+        });
+      });
 
       tradeTarget.addEventListener("change", async () => {
         tradeQuery.targetId = tradeTarget.value || "";
@@ -762,6 +966,7 @@
       });
 
       (async () => {
+        setActiveTab(activeTab);
         await loadConfig();
         await loadTrades();
         await loadAccount();
