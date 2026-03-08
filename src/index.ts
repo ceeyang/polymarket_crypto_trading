@@ -16,6 +16,7 @@ import { sleep } from "./utils.js";
 
 const LOG_FILE = path.resolve("state", "runtime.log");
 const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
+const LOG_TO_STDOUT = !["0", "false", "off", "no"].includes(String(process.env.LOG_TO_STDOUT || "1").trim().toLowerCase());
 
 function appendRuntimeLog(ts: string, msg: string, obj?: unknown): void {
   try {
@@ -29,10 +30,12 @@ function appendRuntimeLog(ts: string, msg: string, obj?: unknown): void {
 
 function log(msg: string, obj?: unknown) {
   const ts = new Date().toISOString();
-  if (obj == null) {
-    console.log(`[${ts}] ${msg}`);
-  } else {
-    console.log(`[${ts}] ${msg}`, obj);
+  if (LOG_TO_STDOUT) {
+    if (obj == null) {
+      console.log(`[${ts}] ${msg}`);
+    } else {
+      console.log(`[${ts}] ${msg}`, obj);
+    }
   }
   appendRuntimeLog(ts, msg, obj);
 }

@@ -1,5 +1,21 @@
 import axios from "axios";
 
+export interface BinanceClosePoint {
+  openTime: number;
+  close: number;
+}
+
+function intervalToMs(interval: string): number {
+  const v = String(interval || "").trim().toLowerCase();
+  if (v === "1m") return 60_000;
+  if (v === "3m") return 3 * 60_000;
+  if (v === "5m") return 5 * 60_000;
+  if (v === "15m") return 15 * 60_000;
+  if (v === "30m") return 30 * 60_000;
+  if (v === "1h") return 60 * 60_000;
+  throw new Error(`Unsupported Binance interval: ${interval}`);
+}
+
 export class BinanceClient {
   constructor(private readonly baseUrl = "https://api.binance.com") {}
 
@@ -38,5 +54,58 @@ export class BinanceClient {
     if (after) return after.close;
 
     return candles[candles.length - 1].close;
+  }
+
+  async getCloseSeries(
+    symbol: string,
+    interval: string,
+    startTime: number,
+    endTime: number,
+    maxPages = 50,
+  ): Promise<BinanceClosePoint[]> {
+    const intervalMs = intervalToMs(interval);
+    const out: BinanceClosePoint[] = [];
+    let cursor = Math.max(0, Math.floor(startTime));
+    let pages = 0;
+
+    while (cursor <= endTime && pages < maxPages) {
+      pages += 1;
+      const { data } = await axios.get(`${this.baseUrl}/api/v3/klines`, {
+        params: {
+          symbol,
+          interval,
+          startTime: cursor,
+          endTime: Math.floor(endTime),
+          limit: 1000,
+        },
+        timeout: 15000,
+      });
+
+      if (!Array.isArray(data) || data.length === 0) break;
+      const rows = data
+        .map((row: unknown[]) => ({
+          openTime: Number(row[0]),
+          close: Number(row[4]),
+        }))
+        .filter((x: BinanceClosePoint) => Number.isFinite(x.openTime) && Number.isFinite(x.close) && x.close > 0)
+        .sort((a: BinanceClosePoint, b: BinanceClosePoint) => a.openTime - b.openTime);
+
+      if (!rows.length) break;
+
+      for (const r of rows) {
+        if (r.openTime < startTime || r.openTime > endTime) continue;
+        const last = out.length ? out[out.length - 1] : null;
+        if (!last || last.openTime !== r.openTime) out.push(r);
+      }
+
+      const lastOpen = rows[rows.length - 1].openTime;
+      const nextCursor = lastOpen + intervalMs;
+      if (!Number.isFinite(nextCursor) || nextCursor <= cursor) break;
+      cursor = nextCursor;
+      if (lastOpen >= endTime) break;
+      if (rows.length < 1000) break;
+    }
+
+    return out;
   }
 }

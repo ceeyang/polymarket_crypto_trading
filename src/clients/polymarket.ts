@@ -3,6 +3,8 @@ import { Wallet } from "ethers";
 
 import type { Config } from "../config.js";
 
+const LOG_TO_STDOUT = !["0", "false", "off", "no"].includes(String(process.env.LOG_TO_STDOUT || "1").trim().toLowerCase());
+
 interface ApiCreds {
   key: string;
   secret: string;
@@ -51,11 +53,15 @@ export class PolymarketTrader {
       if (!PolymarketTrader.hasApiError(probe)) {
         client = suppliedClient;
       } else if (PolymarketTrader.isUnauthorized(probe)) {
-        console.log("[polymarket] supplied POLY_API_* invalid for current signer/profile, fallback to derive");
+        if (LOG_TO_STDOUT) {
+          console.log("[polymarket] supplied POLY_API_* invalid for current signer/profile, fallback to derive");
+        }
       } else {
-        console.log("[polymarket] supplied POLY_API_* failed probe, fallback to derive", {
-          error: PolymarketTrader.extractErrorMessage(probe),
-        });
+        if (LOG_TO_STDOUT) {
+          console.log("[polymarket] supplied POLY_API_* failed probe, fallback to derive", {
+            error: PolymarketTrader.extractErrorMessage(probe),
+          });
+        }
       }
     }
 

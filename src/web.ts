@@ -9,6 +9,7 @@ import { Wallet } from "ethers";
 
 import { MAX_TARGETS, loadConfig, readRuntimeConfig, writeRuntimeConfig, type RuntimeConfigFile } from "./config.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
+import { getAllowedBacktestDays, runBacktest } from "./services/backtest-service.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
 import { StateStore } from "./services/state-store.js";
 import type { LiveTradeRecord } from "./types.js";
@@ -253,7 +254,7 @@ function touchReloadSignal(): number {
   return ts;
 }
 
-export function startServer(port = PORT): http.Server {
+export function startServer(port = PORT, options?: { silent?: boolean }): http.Server {
   const server = http.createServer(async (req, res) => {
     try {
       const method = req.method || "GET";
@@ -316,6 +317,7 @@ export function startServer(port = PORT): http.Server {
           logPrefix: "[web-claim]",
           quietNoop: false,
           maxConcurrency: 3,
+          forceLive: true,
         });
         accountCache = null;
         const account = await fetchAccountSummaryCached(0);
@@ -369,6 +371,56 @@ export function startServer(port = PORT): http.Server {
         return;
       }
 
+      if (method === "POST" && pathname === "/api/backtest/run") {
+        const body = await readBody(req);
+        let payload: any;
+        try {
+          payload = JSON.parse(body || "{}");
+        } catch {
+          sendJson(res, 400, { error: "invalid JSON body" });
+          return;
+        }
+
+        const targetId = String(payload?.targetId || "").trim();
+        const days = Number(payload?.days);
+        if (!targetId) {
+          sendJson(res, 400, { error: "targetId is required" });
+          return;
+        }
+        if (!Number.isFinite(days) || days <= 0) {
+          sendJson(res, 400, { error: "days must be positive number" });
+          return;
+        }
+
+        const cfg = loadConfig();
+        const target = cfg.targets.find((t) => t.id === targetId);
+        if (!target) {
+          sendJson(res, 404, { error: `target not found: ${targetId}` });
+          return;
+        }
+
+        const allowedDays = getAllowedBacktestDays(target.horizonMin);
+        if (!allowedDays.length) {
+          sendJson(res, 400, { error: `${target.horizonMin}m backtest is not supported now` });
+          return;
+        }
+        if (!allowedDays.includes(days)) {
+          sendJson(res, 400, {
+            error: `invalid days=${days} for ${target.horizonMin}m`,
+            allowedDays,
+          });
+          return;
+        }
+
+        const result = await runBacktest(cfg, targetId, days);
+        sendJson(res, 200, {
+          ok: true,
+          result,
+          allowedDays,
+        });
+        return;
+      }
+
       if ((method === "POST" || method === "DELETE") && pathname === "/api/logs/clear") {
         clearLogFile(LOG_FILE);
         sendJson(res, 200, { ok: true });
@@ -394,7 +446,9 @@ export function startServer(port = PORT): http.Server {
   });
 
   server.listen(port, "0.0.0.0", () => {
-    console.log(`[web] dashboard running on http://127.0.0.1:${port}`);
+    if (!options?.silent) {
+      console.log(`[web] dashboard running on http://127.0.0.1:${port}`);
+    }
   });
   return server;
 }

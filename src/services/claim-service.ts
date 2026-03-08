@@ -8,6 +8,8 @@ import { polygon } from "viem/chains";
 
 import type { Config } from "../config.js";
 
+const LOG_TO_STDOUT = !["0", "false", "off", "no"].includes(String(process.env.LOG_TO_STDOUT || "1").trim().toLowerCase());
+
 const CTF_REDEEM_ABI = [
   {
     type: "function",
@@ -28,6 +30,7 @@ export interface ClaimRunOptions {
   logPrefix?: string;
   quietNoop?: boolean;
   maxConcurrency?: number;
+  forceLive?: boolean;
 }
 
 export interface ClaimRunSummary {
@@ -41,6 +44,7 @@ export interface ClaimRunSummary {
 }
 
 function log(prefix: string, msg: string, obj?: unknown): void {
+  if (!LOG_TO_STDOUT) return;
   if (obj == null) {
     console.log(`${prefix} ${msg}`);
   } else {
@@ -232,6 +236,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   const logPrefix = options?.logPrefix ?? "[claim]";
   const quietNoop = Boolean(options?.quietNoop);
   const maxConcurrency = Math.max(1, Math.floor(Number(options?.maxConcurrency ?? 1)));
+  const effectiveDryRun = cfg.dryRun && !Boolean(options?.forceLive);
   if (!cfg.privateKey) {
     throw new Error("PRIVATE_KEY missing in .env");
   }
@@ -271,7 +276,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
       conditions: 0,
       success: 0,
       failed: 0,
-      dryRun: cfg.dryRun,
+      dryRun: effectiveDryRun,
       reason: "no redeemable condition ids",
     };
   }
@@ -286,12 +291,13 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   log(logPrefix, "targets", {
     user,
     conditions: totalConditions,
-    dryRun: cfg.dryRun,
+    dryRun: effectiveDryRun,
+    forceLive: Boolean(options?.forceLive),
     relayerHost: cfg.relayerHost,
     relayerTxType: cfg.relayerTxType,
   });
 
-  if (cfg.dryRun) {
+  if (effectiveDryRun) {
     log(logPrefix, "dry-run conditionIds", conditionIds);
     return {
       user,
@@ -340,7 +346,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     conditions: totalConditions,
     success,
     failed,
-    dryRun: cfg.dryRun,
+    dryRun: effectiveDryRun,
   };
   log(logPrefix, "summary", summary);
   return summary;

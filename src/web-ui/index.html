@@ -610,13 +610,33 @@
         </section>
 
         <section class="card module-panel" data-module="backtest" role="tabpanel">
-          <h2>回测模块（预留）</h2>
-          <div class="placeholder">
-            <div style="font-weight:700; margin-bottom:6px;">即将接入</div>
-            <div class="muted">
-              这里将用于配置回测区间、策略参数、运行回测任务与展示收益曲线/回撤/胜率。
-              当前已预留 Tab 与布局结构，后续可直接接 API。
-            </div>
+          <h2>模型回测</h2>
+          <div class="row" style="margin-bottom: 8px">
+            <label class="muted">盘口</label>
+            <select id="btTarget" class="select"></select>
+            <label class="muted">周期</label>
+            <select id="btDays" class="select"></select>
+            <button id="runBacktestBtn">开始回测</button>
+            <span id="btStatus" class="muted"></span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>盘口</th>
+                  <th>样本数</th>
+                  <th>模型胜率</th>
+                  <th>交易次数</th>
+                  <th>交易胜率</th>
+                  <th>总胜率</th>
+                  <th>交易出现率</th>
+                </tr>
+              </thead>
+              <tbody id="btBody">
+                <tr><td colspan="7" class="muted">请选择盘口后运行回测</td></tr>
+              </tbody>
+            </table>
           </div>
         </section>
       </div>
@@ -643,6 +663,11 @@
       const tradePrevBtn = document.getElementById("tradePrevBtn");
       const tradeNextBtn = document.getElementById("tradeNextBtn");
       const tradePageInfo = document.getElementById("tradePageInfo");
+      const btTarget = document.getElementById("btTarget");
+      const btDays = document.getElementById("btDays");
+      const btBody = document.getElementById("btBody");
+      const btStatus = document.getElementById("btStatus");
+      const runBacktestBtn = document.getElementById("runBacktestBtn");
       const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
       const modulePanels = Array.from(document.querySelectorAll(".module-panel"));
       let activeTab = "runtime";
@@ -722,6 +747,63 @@
           tradeTarget.appendChild(opt);
         }
         tradeTarget.value = prev;
+      }
+
+      function getBacktestDaysOptions(horizonMin) {
+        if (Number(horizonMin) === 5) return [1, 3, 7];
+        if (Number(horizonMin) === 15) return [1, 3, 7, 15];
+        return [];
+      }
+
+      function renderBacktestTargets(targets) {
+        const prev = btTarget.value || "";
+        const list = (targets || []).filter((t) => Number(t.horizonMin) === 5 || Number(t.horizonMin) === 15);
+        btTarget.innerHTML = "";
+        for (const t of list) {
+          const opt = document.createElement("option");
+          opt.value = t.id || "";
+          opt.textContent = `${t.coin || "-"}-${Number(t.horizonMin)}M (${t.id})`;
+          opt.setAttribute("data-horizon", String(t.horizonMin || ""));
+          btTarget.appendChild(opt);
+        }
+        btTarget.value = list.some((t) => t.id === prev) ? prev : (list[0]?.id || "");
+        syncBacktestDays();
+      }
+
+      function syncBacktestDays() {
+        const selectedId = btTarget.value || "";
+        const targets = Array.isArray(fullConfig?.prediction?.targets) ? fullConfig.prediction.targets : [];
+        const target = targets.find((x) => x.id === selectedId);
+        const daysList = getBacktestDaysOptions(Number(target?.horizonMin));
+        const prev = btDays.value || "";
+        btDays.innerHTML = "";
+        for (const d of daysList) {
+          const opt = document.createElement("option");
+          opt.value = String(d);
+          opt.textContent = `${d}天`;
+          btDays.appendChild(opt);
+        }
+        btDays.value = daysList.includes(Number(prev)) ? prev : String(daysList[0] || "");
+      }
+
+      function renderBacktestResult(result) {
+        btBody.innerHTML = "";
+        if (!result || typeof result !== "object") {
+          btBody.innerHTML = '<tr><td colspan="7" class="muted">暂无回测结果</td></tr>';
+          return;
+        }
+        const tr = document.createElement("tr");
+        const label = `${result.coin || "-"}-${result.horizonMin || "-"}M (${result.targetId || "-"})`;
+        tr.innerHTML = `
+          <td>${escapeHtml(label)}</td>
+          <td>${Number(result.sampleCount ?? 0)}</td>
+          <td>${(Number(result.predictionWinRate ?? 0) * 100).toFixed(2)}%</td>
+          <td>${Number(result.tradeCount ?? 0)}</td>
+          <td>${(Number(result.tradeWinRate ?? 0) * 100).toFixed(2)}%</td>
+          <td>${(Number(result.totalWinRate ?? 0) * 100).toFixed(2)}%</td>
+          <td>${(Number(result.tradeSignalRate ?? 0) * 100).toFixed(2)}%</td>
+        `;
+        btBody.appendChild(tr);
       }
 
       function renderTradeSummary(summary) {
@@ -808,6 +890,7 @@
         const targets = Array.isArray(cfg.prediction.targets) ? cfg.prediction.targets : [];
         renderTargets(targets);
         renderTradeTargets(targets);
+        renderBacktestTargets(targets);
       }
 
       function readFormToConfig() {
@@ -882,6 +965,40 @@
           cfgStatus.textContent = `已保存，bot 将在下一轮自动重载（token=${data.reloadToken || "-"}）`;
         } catch (err) {
           cfgStatus.textContent = `保存失败: ${String(err)}`;
+        }
+      }
+
+      async function runBacktest() {
+        const targetId = String(btTarget.value || "").trim();
+        const days = Number(btDays.value || "0");
+        if (!targetId) {
+          btStatus.textContent = "请选择回测盘口";
+          return;
+        }
+        if (!Number.isFinite(days) || days <= 0) {
+          btStatus.textContent = "请选择有效回测周期";
+          return;
+        }
+
+        try {
+          runBacktestBtn.disabled = true;
+          btStatus.textContent = "回测运行中...";
+          const resp = await fetch("/api/backtest/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ targetId, days }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          renderBacktestResult(data?.result || null);
+          const summary = data?.result
+            ? `完成: 样本${data.result.sampleCount}, 交易${data.result.tradeCount}, 交易胜率${(Number(data.result.tradeWinRate || 0) * 100).toFixed(2)}%`
+            : "完成";
+          btStatus.textContent = summary;
+        } catch (err) {
+          btStatus.textContent = `回测失败: ${String(err)}`;
+        } finally {
+          runBacktestBtn.disabled = false;
         }
       }
 
@@ -1003,12 +1120,15 @@
       document.getElementById("clearTradesBtn").addEventListener("click", clearTrades);
       document.getElementById("refreshBalanceBtn").addEventListener("click", loadAccount);
       document.getElementById("claimBalanceBtn").addEventListener("click", claimRewards);
+      document.getElementById("runBacktestBtn").addEventListener("click", runBacktest);
       tabButtons.forEach((btn) => {
         btn.addEventListener("click", () => {
           const tab = btn.getAttribute("data-tab") || "runtime";
           setActiveTab(tab);
         });
       });
+
+      btTarget.addEventListener("change", syncBacktestDays);
 
       tradeTarget.addEventListener("change", async () => {
         tradeQuery.targetId = tradeTarget.value || "";

@@ -60,7 +60,7 @@
       },
       {
         "id": "BTC_15m",
-        "enabled": false,
+        "enabled": true,
         "coin": "BTC",
         "horizonMin": 15,
         "symbol": "BTCUSDT",
@@ -68,7 +68,7 @@
       },
       {
         "id": "ETH_15m",
-        "enabled": false,
+        "enabled": true,
         "coin": "ETH",
         "horizonMin": 15,
         "symbol": "ETHUSDT",

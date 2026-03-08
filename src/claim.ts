@@ -9,6 +9,7 @@ async function main(): Promise<void> {
   await claimRedeemablePositions(cfg, {
     conditionIds: cliIds,
     logPrefix: "[claim]",
+    forceLive: true,
   });
 }
 
