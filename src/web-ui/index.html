@@ -6,91 +6,156 @@
     <title>Polymarket Bot Dashboard</title>
     <style>
       :root {
-        --bg: #f5f7fb;
+        --bg: #f4f7fb;
         --card: #ffffff;
-        --text: #121826;
-        --muted: #60708a;
-        --primary: #0f62fe;
-        --border: #dbe3ef;
+        --text: #101828;
+        --muted: #667085;
+        --border: #d0d5dd;
+        --primary: #0b63f6;
       }
       body {
         margin: 0;
-        background: linear-gradient(120deg, #eef3ff 0%, #f8fafc 60%, #eef8f0 100%);
+        background: radial-gradient(circle at 20% 0%, #e9f0ff 0%, #f8fbff 35%, #eef8ef 100%);
         color: var(--text);
         font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
       }
       .wrap {
-        max-width: 1200px;
-        margin: 24px auto;
-        padding: 0 16px;
+        max-width: 1240px;
+        margin: 22px auto;
+        padding: 0 14px;
       }
       .grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
       }
       .card {
         background: var(--card);
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: 14px;
         padding: 14px;
+        width: 100%;
+        box-sizing: border-box;
+        overflow: hidden;
       }
       h1 {
-        margin: 0 0 12px;
+        margin: 0 0 8px;
         font-size: 22px;
       }
       h2 {
-        margin: 0 0 10px;
+        margin: 0 0 8px;
         font-size: 16px;
       }
       .muted {
         color: var(--muted);
         font-size: 13px;
       }
-      textarea {
-        width: 100%;
-        min-height: 560px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 10px;
-        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-        font-size: 12px;
-      }
-      pre {
-        height: 560px;
-        overflow: auto;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 10px;
-        margin: 0;
-        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-        font-size: 12px;
-        background: #f8fbff;
-      }
       .row {
         display: flex;
-        gap: 8px;
         align-items: center;
-        margin-bottom: 8px;
+        gap: 10px;
         flex-wrap: wrap;
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(180px, 1fr));
+        gap: 10px;
+        margin: 12px 0;
+      }
+      .field {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 8px;
+        background: #fbfdff;
+      }
+      .field label {
+        display: block;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .field input[type="number"],
+      .field input[type="text"] {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 7px 8px;
+        font-size: 13px;
+        box-sizing: border-box;
+      }
+      .toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+        table-layout: auto;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #e9edf5;
+        text-align: left;
+        padding: 8px 6px;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 12px;
       }
       button {
         border: 0;
         border-radius: 8px;
         background: var(--primary);
-        color: white;
+        color: #fff;
         padding: 8px 12px;
         font-weight: 600;
         cursor: pointer;
       }
-      input {
+      pre {
+        margin: 0;
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 7px 8px;
-        width: 80px;
+        border-radius: 10px;
+        padding: 10px;
+        height: min(52vh, 640px);
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow: auto;
+        background: #f8fbff;
+        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 12px;
+        white-space: pre;
       }
-      @media (max-width: 1024px) {
-        .grid {
+      .table-wrap {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+      }
+      .log-wrap {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+      }
+      .chip {
+        display: inline-block;
+        font-size: 12px;
+        color: #0f172a;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid #dbe4f5;
+        background: #f6f9ff;
+      }
+      @media (max-width: 1050px) {
+        .form-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 640px) {
+        .form-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -99,43 +164,186 @@
   <body>
     <div class="wrap">
       <h1>Polymarket 多盘口机器人控制台</h1>
-      <div class="muted">更新配置后会写入 <code>config/runtime.json</code>。建议重启 bot 生效。</div>
+      <div class="muted">保存后会写入 <code>config/runtime.json</code>，并通知 bot 在下一轮自动热重载。</div>
+
       <div class="grid">
         <section class="card">
-          <h2>配置编辑器</h2>
-          <div class="row">
-            <button id="loadConfigBtn">刷新配置</button>
-            <button id="saveConfigBtn">保存配置</button>
+          <h2>运行与风控配置</h2>
+          <div class="row" style="margin-bottom: 10px">
+            <button id="loadBtn">刷新配置</button>
+            <button id="saveBtn">保存并生效</button>
             <span id="cfgStatus" class="muted"></span>
           </div>
-          <textarea id="configArea"></textarea>
+
+          <div class="form-grid">
+            <div class="field">
+              <label>轮询间隔(秒)</label>
+              <input id="pollIntervalSec" type="number" min="5" step="1" />
+            </div>
+            <div class="field">
+              <label>最小 Edge</label>
+              <input id="minEdge" type="number" min="0" step="0.001" />
+            </div>
+            <div class="field">
+              <label>单笔默认金额($)</label>
+              <input id="baseBetUsd" type="number" min="0.1" step="0.1" />
+            </div>
+            <div class="field">
+              <label>单笔最大金额($)</label>
+              <input id="maxBetUsd" type="number" min="0.1" step="0.1" />
+            </div>
+            <div class="field">
+              <label>最小下单份额</label>
+              <input id="minOrderShares" type="number" min="1" step="1" />
+            </div>
+            <div class="field">
+              <label>下单价格激进度</label>
+              <input id="priceAggression" type="number" min="0" step="0.001" />
+            </div>
+            <div class="field">
+              <label>盘口冷却(秒)</label>
+              <input id="cooldownSeconds" type="number" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label>自动领取间隔(秒)</label>
+              <input id="claimCooldownSec" type="number" min="30" step="1" />
+            </div>
+          </div>
+
+          <div class="row" style="margin: 10px 0 14px">
+            <label class="toggle"><input id="dryRun" type="checkbox" /> dryRun（不真实下单）</label>
+            <label class="toggle"><input id="autoClaim" type="checkbox" /> 自动领取收益</label>
+          </div>
+
+          <h2>盘口启用开关 <span class="chip" id="enabledCount">0 / 0</span></h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>启用</th>
+                  <th>ID</th>
+                  <th>币种</th>
+                  <th>周期</th>
+                  <th>交易对</th>
+                  <th>模型路径</th>
+                </tr>
+              </thead>
+              <tbody id="targetsBody"></tbody>
+            </table>
+          </div>
         </section>
+
         <section class="card">
           <h2>运行日志</h2>
-          <div class="row">
+          <div class="row" style="margin-bottom: 8px">
             <button id="refreshLogBtn">刷新日志</button>
+            <button id="clearLogBtn">清空日志</button>
             <label class="muted" for="tailInput">tail</label>
-            <input id="tailInput" type="number" value="200" min="50" max="2000" />
+            <input id="tailInput" type="number" value="200" min="50" max="2000" style="width: 90px" />
             <span id="logStatus" class="muted"></span>
           </div>
-          <pre id="logArea"></pre>
+          <div class="log-wrap">
+            <pre id="logArea"></pre>
+          </div>
         </section>
       </div>
     </div>
 
     <script>
-      const cfgArea = document.getElementById("configArea");
-      const logArea = document.getElementById("logArea");
+      let fullConfig = null;
+
       const cfgStatus = document.getElementById("cfgStatus");
+      const logArea = document.getElementById("logArea");
       const logStatus = document.getElementById("logStatus");
       const tailInput = document.getElementById("tailInput");
+      const targetsBody = document.getElementById("targetsBody");
+      const enabledCount = document.getElementById("enabledCount");
+
+      const num = (id, fallback) => {
+        const v = Number(document.getElementById(id).value);
+        return Number.isFinite(v) ? v : fallback;
+      };
+
+      const setValue = (id, value) => {
+        const el = document.getElementById(id);
+        el.value = value == null ? "" : String(value);
+      };
+
+      function renderTargets(targets) {
+        targetsBody.innerHTML = "";
+        let enabled = 0;
+
+        for (let i = 0; i < targets.length; i += 1) {
+          const t = targets[i];
+          if (t.enabled) enabled += 1;
+
+          const tr = document.createElement("tr");
+          const horizonText = Number(t.horizonMin) === 60 ? "1h" : `${t.horizonMin}m`;
+          tr.innerHTML = `
+            <td><input type="checkbox" class="target-enabled" data-idx="${i}" ${t.enabled ? "checked" : ""} /></td>
+            <td>${t.id || ""}</td>
+            <td>${t.coin || ""}</td>
+            <td>${horizonText}</td>
+            <td>${t.symbol || ""}</td>
+            <td title="${t.modelPath || ""}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.modelPath || ""}</td>
+          `;
+          targetsBody.appendChild(tr);
+        }
+
+        enabledCount.textContent = `${enabled} / ${targets.length}`;
+      }
+
+      function fillForm(cfg) {
+        setValue("pollIntervalSec", cfg.runtime.pollIntervalSec);
+        setValue("minEdge", cfg.prediction.minEdge);
+        setValue("baseBetUsd", cfg.prediction.baseBetUsd);
+        setValue("maxBetUsd", cfg.prediction.maxBetUsd);
+        setValue("minOrderShares", cfg.prediction.minOrderShares);
+        setValue("priceAggression", cfg.prediction.priceAggression);
+        setValue("cooldownSeconds", cfg.marketFilter.cooldownSeconds);
+        setValue("claimCooldownSec", cfg.runtime.claimCooldownSec || 300);
+
+        document.getElementById("dryRun").checked = Boolean(cfg.runtime.dryRun);
+        document.getElementById("autoClaim").checked = Boolean(cfg.runtime.autoClaim);
+
+        renderTargets(Array.isArray(cfg.prediction.targets) ? cfg.prediction.targets : []);
+      }
+
+      function readFormToConfig() {
+        const next = JSON.parse(JSON.stringify(fullConfig));
+
+        next.runtime.dryRun = document.getElementById("dryRun").checked;
+        next.runtime.autoClaim = document.getElementById("autoClaim").checked;
+        next.runtime.pollIntervalSec = Math.max(5, Math.round(num("pollIntervalSec", next.runtime.pollIntervalSec || 20)));
+        next.runtime.claimCooldownSec = Math.max(30, Math.round(num("claimCooldownSec", next.runtime.claimCooldownSec || 300)));
+
+        next.prediction.minEdge = Math.max(0, num("minEdge", next.prediction.minEdge || 0.02));
+        next.prediction.baseBetUsd = Math.max(0.1, num("baseBetUsd", next.prediction.baseBetUsd || 1.5));
+        next.prediction.maxBetUsd = Math.max(next.prediction.baseBetUsd, num("maxBetUsd", next.prediction.maxBetUsd || 2.6));
+        next.prediction.minOrderShares = Math.max(1, num("minOrderShares", next.prediction.minOrderShares || 5));
+        next.prediction.priceAggression = Math.max(0, num("priceAggression", next.prediction.priceAggression || 0.01));
+
+        next.marketFilter.cooldownSeconds = Math.max(0, Math.round(num("cooldownSeconds", next.marketFilter.cooldownSeconds || 20)));
+
+        const checks = document.querySelectorAll(".target-enabled");
+        checks.forEach((el) => {
+          const idx = Number(el.getAttribute("data-idx"));
+          if (!Number.isFinite(idx)) return;
+          if (!next.prediction.targets[idx]) return;
+          next.prediction.targets[idx].enabled = Boolean(el.checked);
+        });
+
+        return next;
+      }
 
       async function loadConfig() {
         cfgStatus.textContent = "加载中...";
         try {
           const resp = await fetch("/api/config");
           const data = await resp.json();
-          cfgArea.value = JSON.stringify(data, null, 2);
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          fullConfig = data;
+          fillForm(data);
           cfgStatus.textContent = "配置已加载";
         } catch (err) {
           cfgStatus.textContent = `加载失败: ${String(err)}`;
@@ -143,19 +351,21 @@
       }
 
       async function saveConfig() {
+        if (!fullConfig) return;
         cfgStatus.textContent = "保存中...";
         try {
-          const parsed = JSON.parse(cfgArea.value);
+          const next = readFormToConfig();
           const resp = await fetch("/api/config", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(parsed),
+            body: JSON.stringify(next),
           });
           const data = await resp.json();
-          if (!resp.ok) {
-            throw new Error(data?.error || `HTTP ${resp.status}`);
-          }
-          cfgStatus.textContent = "保存成功";
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+
+          fullConfig = next;
+          fillForm(next);
+          cfgStatus.textContent = `已保存，bot 将在下一轮自动重载（token=${data.reloadToken || "-"}）`;
         } catch (err) {
           cfgStatus.textContent = `保存失败: ${String(err)}`;
         }
@@ -174,9 +384,22 @@
         }
       }
 
-      document.getElementById("loadConfigBtn").addEventListener("click", loadConfig);
-      document.getElementById("saveConfigBtn").addEventListener("click", saveConfig);
+      async function clearLogs() {
+        try {
+          const resp = await fetch("/api/logs/clear", { method: "POST" });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          await loadLogs();
+          logStatus.textContent = `日志已清空 ${new Date().toLocaleTimeString()}`;
+        } catch (err) {
+          logStatus.textContent = `清空失败: ${String(err)}`;
+        }
+      }
+
+      document.getElementById("loadBtn").addEventListener("click", loadConfig);
+      document.getElementById("saveBtn").addEventListener("click", saveConfig);
       document.getElementById("refreshLogBtn").addEventListener("click", loadLogs);
+      document.getElementById("clearLogBtn").addEventListener("click", clearLogs);
 
       loadConfig();
       loadLogs();

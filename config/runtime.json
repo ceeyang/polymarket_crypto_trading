@@ -10,7 +10,7 @@
     "trainedModelPath": "state/models/eth_5m_logreg.json",
     "minEdge": 0.02,
     "baseBetUsd": 1.5,
-    "maxBetUsd": 2.6,
+    "maxBetUsd": 2.5,
     "minOrderShares": 5,
     "priceAggression": 0.01,
     "targets": [

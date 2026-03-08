@@ -3,13 +3,14 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
-import { URL } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 
 import { MAX_TARGETS, readRuntimeConfig, writeRuntimeConfig, type RuntimeConfigFile } from "./config.js";
 
 const PORT = Number(process.env.WEB_PORT || 8787);
 const UI_FILE = path.resolve("src", "web-ui", "index.html");
 const LOG_FILE = path.resolve("state", "runtime.log");
+const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   res.statusCode = status;
@@ -39,6 +40,11 @@ function tailLines(filePath: string, maxLines: number): string[] {
   return lines.slice(-Math.max(1, maxLines));
 }
 
+function clearLogFile(filePath: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, "", "utf8");
+}
+
 function validateRuntimeConfig(payload: unknown): { ok: true; data: RuntimeConfigFile } | { ok: false; error: string } {
   if (!payload || typeof payload !== "object") {
     return { ok: false, error: "config must be object" };
@@ -54,12 +60,22 @@ function validateRuntimeConfig(payload: unknown): { ok: true; data: RuntimeConfi
   return { ok: true, data };
 }
 
-function startServer(): void {
+function touchReloadSignal(): number {
+  fs.mkdirSync(path.dirname(RELOAD_SIGNAL_FILE), { recursive: true });
+  const ts = Date.now();
+  fs.writeFileSync(RELOAD_SIGNAL_FILE, String(ts), "utf8");
+  return ts;
+}
+
+export function startServer(port = PORT): http.Server {
   const server = http.createServer(async (req, res) => {
     try {
       const method = req.method || "GET";
-      const parsedUrl = new URL(req.url || "/", `http://127.0.0.1:${PORT}`);
-      const pathname = parsedUrl.pathname;
+      const parsedUrl = new URL(req.url || "/", `http://127.0.0.1:${port}`);
+      const pathnameRaw = parsedUrl.pathname;
+      const pathname = pathnameRaw.length > 1 && pathnameRaw.endsWith("/")
+        ? pathnameRaw.slice(0, -1)
+        : pathnameRaw;
 
       if (method === "GET" && pathname === "/") {
         const html = fs.existsSync(UI_FILE)
@@ -90,7 +106,8 @@ function startServer(): void {
           return;
         }
         writeRuntimeConfig(validated.data);
-        sendJson(res, 200, { ok: true });
+        const reloadToken = touchReloadSignal();
+        sendJson(res, 200, { ok: true, reloadToken });
         return;
       }
 
@@ -101,15 +118,32 @@ function startServer(): void {
         return;
       }
 
+      if ((method === "POST" || method === "DELETE") && pathname === "/api/logs/clear") {
+        clearLogFile(LOG_FILE);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if ((method === "POST" || method === "DELETE") && pathname === "/api/logs" && parsedUrl.searchParams.get("action") === "clear") {
+        clearLogFile(LOG_FILE);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
       sendJson(res, 404, { error: "not found" });
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   });
 
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`[web] dashboard running on http://127.0.0.1:${PORT}`);
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`[web] dashboard running on http://127.0.0.1:${port}`);
   });
+  return server;
 }
 
-startServer();
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMain) {
+  startServer();
+}

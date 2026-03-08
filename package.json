@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "tsx src/dev.ts",
+    "bot": "tsx src/index.ts",
     "web": "tsx src/web.ts",
     "balance": "tsx src/balance.ts",
     "claim": "tsx src/claim.ts",

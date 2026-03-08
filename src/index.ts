@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { MAX_TARGETS, loadConfig, type Config, type MarketTarget } from "./config.js";
+import { MAX_TARGETS, loadConfig, readRuntimeConfig, type Config, type MarketTarget } from "./config.js";
 import { BinanceClient } from "./clients/binance.js";
 import { GammaClient } from "./clients/gamma.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
@@ -12,6 +13,7 @@ import { StateStore } from "./services/state-store.js";
 import { sleep } from "./utils.js";
 
 const LOG_FILE = path.resolve("state", "runtime.log");
+const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
 
 function appendRuntimeLog(ts: string, msg: string, obj?: unknown): void {
   try {
@@ -99,6 +101,16 @@ interface PreparedOrder {
   entryRefPrice: number;
 }
 
+interface RuntimeContext {
+  cfg: Config;
+  cfgKey: string;
+  reloadToken: number;
+  gamma: GammaClient;
+  trader: PolymarketTrader;
+  activeTargets: MarketTarget[];
+  targetModels: Map<string, TrainedModelArtifact>;
+}
+
 function loadTargetModels(cfg: Config, targets: MarketTarget[]): Map<string, TrainedModelArtifact> {
   const models = new Map<string, TrainedModelArtifact>();
   for (const t of targets) {
@@ -128,14 +140,103 @@ function loadTargetModels(cfg: Config, targets: MarketTarget[]): Map<string, Tra
   return models;
 }
 
-async function run(): Promise<void> {
+function readConfigKey(): string {
+  try {
+    return JSON.stringify(readRuntimeConfig());
+  } catch {
+    return "";
+  }
+}
+
+function readReloadToken(): number {
+  try {
+    const raw = fs.readFileSync(RELOAD_SIGNAL_FILE, "utf8").trim();
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch {
+    // ignore
+  }
+  try {
+    const st = fs.statSync(RELOAD_SIGNAL_FILE);
+    return st.mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+async function buildRuntimeContext(cfgKey: string, reloadToken: number): Promise<RuntimeContext> {
   const cfg = loadConfig();
   const gamma = new GammaClient(cfg);
-  const binance = new BinanceClient();
   const trader = await PolymarketTrader.create(cfg);
+
+  const enabledTargets = cfg.targets.filter((x) => x.enabled).slice(0, MAX_TARGETS);
+  if (enabledTargets.length === 0) {
+    throw new Error("No enabled targets in config.prediction.targets");
+  }
+
+  const targetModels = loadTargetModels(cfg, enabledTargets);
+  const activeTargets = enabledTargets.filter((t) => targetModels.has(t.id));
+  if (activeTargets.length === 0) {
+    throw new Error("No active targets with valid models");
+  }
+
+  return {
+    cfg,
+    cfgKey,
+    reloadToken,
+    gamma,
+    trader,
+    activeTargets,
+    targetModels,
+  };
+}
+
+export async function startBot(): Promise<void> {
+  const binance = new BinanceClient();
   const state = new StateStore();
   const sessionStartedAt = new Date().toISOString();
+  let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
+
+  const reloadRuntime = async (reason: string): Promise<RuntimeContext> => {
+    const cfgKey = readConfigKey();
+    const reloadToken = readReloadToken();
+    if (runtime && runtime.cfgKey === cfgKey && runtime.reloadToken === reloadToken) {
+      return runtime;
+    }
+
+    try {
+      const next = await buildRuntimeContext(cfgKey, reloadToken);
+      const isStartup = runtime == null;
+      runtime = next;
+
+      if (isStartup) {
+        log(`bot started dryRun=${next.cfg.dryRun} interval=${next.cfg.pollIntervalSec}s targets=${next.activeTargets.length}`);
+        log(`session started at ${sessionStartedAt}`);
+      } else {
+        log("runtime reloaded", {
+          reason,
+          dryRun: next.cfg.dryRun,
+          pollIntervalSec: next.cfg.pollIntervalSec,
+          targets: next.activeTargets.length,
+        });
+      }
+      log(`auto claim enabled=${next.cfg.autoClaim} cooldown=${next.cfg.claimCooldownSec}s`);
+      log("active targets", next.activeTargets.map((x) => ({
+        id: x.id,
+        coin: x.coin,
+        horizonMin: x.horizonMin,
+        symbol: resolveSymbol(x),
+        modelPath: resolveModelPath(next.cfg, x),
+      })));
+      return next;
+    } catch (err) {
+      if (!runtime) throw err;
+      log("runtime reload failed, keep previous config", err instanceof Error ? err.message : err);
+      return runtime;
+    }
+  };
+
   const initialPerfAll = state.getPerformanceSummary();
   const initialPerfSession = state.getPerformanceSummarySince(sessionStartedAt);
   let lastSummaryKey = JSON.stringify({
@@ -149,30 +250,13 @@ async function run(): Promise<void> {
     sessionWinRate: Number((initialPerfSession.winRate * 100).toFixed(2)),
   });
 
-  const enabledTargets = cfg.targets.filter((x) => x.enabled).slice(0, MAX_TARGETS);
-  if (enabledTargets.length === 0) {
-    throw new Error("No enabled targets in config.prediction.targets");
-  }
-
-  const targetModels = loadTargetModels(cfg, enabledTargets);
-  const activeTargets = enabledTargets.filter((t) => targetModels.has(t.id));
-  if (activeTargets.length === 0) {
-    throw new Error("No active targets with valid models");
-  }
-
-  log(`bot started dryRun=${cfg.dryRun} interval=${cfg.pollIntervalSec}s targets=${activeTargets.length}`);
-  log(`session started at ${sessionStartedAt}`);
-  log(`auto claim enabled=${cfg.autoClaim} cooldown=${cfg.claimCooldownSec}s`);
-  log("active targets", activeTargets.map((x) => ({
-    id: x.id,
-    coin: x.coin,
-    horizonMin: x.horizonMin,
-    symbol: resolveSymbol(x),
-    modelPath: resolveModelPath(cfg, x),
-  })));
+  runtime = await reloadRuntime("startup");
 
   while (true) {
     try {
+      const currentRuntime = await reloadRuntime("round_begin");
+      const { cfg, gamma, trader, activeTargets, targetModels } = currentRuntime;
+
       await state.settleDueTrades(90_000, async (t) => {
         const settleMs = Date.parse(t.settleTime);
         if (!Number.isFinite(settleMs)) return null;
@@ -339,12 +423,16 @@ async function run(): Promise<void> {
     } catch (err) {
       log("main loop error", err instanceof Error ? err.message : err);
     } finally {
-      await sleep(cfg.pollIntervalSec * 1000);
+      await sleep((runtime?.cfg.pollIntervalSec ?? 20) * 1000);
     }
   }
 }
 
-run().catch((err) => {
-  console.error("fatal error", err);
-  process.exit(1);
-});
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMain) {
+  startBot().catch((err) => {
+    console.error("fatal error", err);
+    process.exit(1);
+  });
+}

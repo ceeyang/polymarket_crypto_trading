@@ -29,12 +29,21 @@ cp .env.example .env
 # 编辑 .env（仅密钥）
 # 编辑 config/runtime.json（交易与训练参数）
 pnpm run train:model
-npm run dev
+pnpm run dev
 ```
 
-Web 配置与日志面板：
+`pnpm run dev` 会同时启动：
+- Bot 主循环
+- Web 控制台（默认 `http://127.0.0.1:8787`）
+
+仅启动 Web：
 ```bash
 pnpm run web
+```
+
+仅启动 Bot：
+```bash
+pnpm run bot
 ```
 
 查询余额：
