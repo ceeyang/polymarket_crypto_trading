@@ -9,6 +9,7 @@ import { Wallet } from "ethers";
 
 import { MAX_TARGETS, loadConfig, readRuntimeConfig, writeRuntimeConfig, type RuntimeConfigFile } from "./config.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
+import { claimRedeemablePositions } from "./services/claim-service.js";
 import { StateStore } from "./services/state-store.js";
 import type { LiveTradeRecord } from "./types.js";
 
@@ -18,6 +19,8 @@ const LOG_FILE = path.resolve("state", "runtime.log");
 const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
 const stateStore = new StateStore();
 let accountCache: { ts: number; data: Awaited<ReturnType<typeof fetchAccountSummary>> } | null = null;
+const marketUrlCache = new Map<string, { ts: number; url: string }>();
+const MARKET_URL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   res.statusCode = status;
@@ -84,6 +87,11 @@ function statusText(t: LiveTradeRecord): "WIN" | "LOSE" | "PENDING" {
   return t.win ? "WIN" : "LOSE";
 }
 
+function executionModeText(t: LiveTradeRecord): "LIVE" | "DRY_RUN" {
+  if (t.executionMode === "LIVE" || t.executionMode === "DRY_RUN") return t.executionMode;
+  return t.orderId && String(t.orderId).trim() ? "LIVE" : "DRY_RUN";
+}
+
 function pickAddress(privateKey: string, funder?: string): string | null {
   if (funder && funder.trim()) return funder.trim();
   if (!privateKey) return null;
@@ -105,6 +113,58 @@ function rawUsdcToNumber(raw: string): number {
   } catch {
     return 0;
   }
+}
+
+function firstNonEmptyString(...values: unknown[]): string | null {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim().length > 0) {
+      return v.trim();
+    }
+  }
+  return null;
+}
+
+function toAbsoluteUrl(input: string, fallbackBase: string): string {
+  try {
+    return new URL(input, fallbackBase).toString();
+  } catch {
+    return input;
+  }
+}
+
+async function resolveMarketUrl(marketId: string): Promise<string | null> {
+  const id = String(marketId || "").trim();
+  if (!id) return null;
+
+  const cached = marketUrlCache.get(id);
+  if (cached && Date.now() - cached.ts < MARKET_URL_CACHE_TTL_MS) {
+    return cached.url;
+  }
+
+  const cfg = loadConfig();
+  const fallbackUrl = `${cfg.gammaHost}/markets/${encodeURIComponent(id)}`;
+  let finalUrl = fallbackUrl;
+  try {
+    const { data } = await axios.get(fallbackUrl, { timeout: 8000 });
+    const row = (data && typeof data === "object" && !Array.isArray(data))
+      ? data
+      : (data?.data && typeof data.data === "object" && !Array.isArray(data.data) ? data.data : null);
+
+    if (row) {
+      const directUrl = firstNonEmptyString(row.url, row.marketUrl, row.market_url);
+      const slug = firstNonEmptyString(row.slug, row.marketSlug, row.market_slug);
+      if (directUrl && /polymarket\.com/i.test(directUrl)) {
+        finalUrl = toAbsoluteUrl(directUrl, "https://polymarket.com");
+      } else if (slug) {
+        finalUrl = `https://polymarket.com/event/${encodeURIComponent(slug)}`;
+      }
+    }
+  } catch {
+    // keep fallbackUrl
+  }
+
+  marketUrlCache.set(id, { ts: Date.now(), url: finalUrl });
+  return finalUrl;
 }
 
 async function fetchAccountSummary(): Promise<{
@@ -250,17 +310,32 @@ export function startServer(port = PORT): http.Server {
         return;
       }
 
+      if (method === "POST" && pathname === "/api/account/claim") {
+        const cfg = loadConfig();
+        const claim = await claimRedeemablePositions(cfg, {
+          logPrefix: "[web-claim]",
+          quietNoop: false,
+          maxConcurrency: 3,
+        });
+        accountCache = null;
+        const account = await fetchAccountSummaryCached(0);
+        sendJson(res, 200, { ok: true, claim, account });
+        return;
+      }
+
       if (method === "GET" && pathname === "/api/trades") {
         const page = parsePositiveInt(parsedUrl.searchParams.get("page"), 1);
         const pageSize = Math.min(100, parsePositiveInt(parsedUrl.searchParams.get("pageSize"), 20));
         const targetId = String(parsedUrl.searchParams.get("targetId") || "").trim();
         const resolvedParam = String(parsedUrl.searchParams.get("resolved") || "").trim().toLowerCase();
+        const includeAttempts = String(parsedUrl.searchParams.get("includeAttempts") || "").trim().toLowerCase() === "true";
 
         const state = stateStore.load();
         const allTrades = [...(state.trades ?? [])];
         allTrades.sort((a, b) => Date.parse(b.entryTime) - Date.parse(a.entryTime));
 
         const filtered = allTrades.filter((t) => {
+          if (!includeAttempts && executionModeText(t) !== "LIVE" && (!t.orderId || !String(t.orderId).trim()) && t.executionMode !== "DRY_RUN") return false;
           if (targetId && t.targetId !== targetId) return false;
           if (resolvedParam === "true" && !t.resolved) return false;
           if (resolvedParam === "false" && t.resolved) return false;
@@ -271,10 +346,13 @@ export function startServer(port = PORT): http.Server {
         const totalPages = Math.max(1, Math.ceil(total / pageSize));
         const safePage = Math.min(Math.max(1, page), totalPages);
         const start = (safePage - 1) * pageSize;
-        const items = filtered.slice(start, start + pageSize).map((t) => ({
+        const pageTrades = filtered.slice(start, start + pageSize);
+        const items = await Promise.all(pageTrades.map(async (t) => ({
           ...t,
           status: statusText(t),
-        }));
+          executionMode: executionModeText(t),
+          marketUrl: await resolveMarketUrl(String(t.marketId || "")),
+        })));
 
         sendJson(res, 200, {
           summary: summarizeTrades(filtered),

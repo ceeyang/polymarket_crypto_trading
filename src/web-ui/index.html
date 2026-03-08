@@ -212,6 +212,7 @@
       #refreshLogBtn,
       #refreshTradesBtn,
       #refreshBalanceBtn,
+      #claimBalanceBtn,
       #tradePrevBtn,
       #tradeNextBtn {
         background: #ffffff;
@@ -354,6 +355,23 @@
         color: var(--warn);
         background: #ffefc6;
       }
+      .badge.mode-live {
+        color: #1d4ed8;
+        background: #dbeafe;
+      }
+      .badge.mode-dry {
+        color: #5b21b6;
+        background: #ede9fe;
+      }
+      .market-link {
+        color: #1d4ed8;
+        text-decoration: none;
+        border-bottom: 1px dashed rgba(29, 78, 216, 0.45);
+      }
+      .market-link:hover {
+        color: #1e40af;
+        border-bottom-color: rgba(30, 64, 175, 0.8);
+      }
       .select {
         border: 1px solid var(--border);
         border-radius: 10px;
@@ -405,6 +423,7 @@
       </div>
       <div class="row" style="margin: 8px 0 12px">
         <button id="refreshBalanceBtn">刷新余额</button>
+        <button id="claimBalanceBtn">赎回收益</button>
         <span id="balanceInfo" class="muted">余额加载中...</span>
       </div>
 
@@ -556,13 +575,13 @@
             <table>
               <thead>
                 <tr>
-                  <th>进场时间</th>
                   <th>盘口</th>
                   <th>方向</th>
                   <th>结果</th>
-                  <th>进场价</th>
+                  <th>模式</th>
+                  <th>入场价</th>
                   <th>结算价</th>
-                  <th>marketId</th>
+                  <th>进场时间</th>
                 </tr>
               </thead>
               <tbody id="tradesBody"></tbody>
@@ -614,6 +633,7 @@
       const targetsList = document.getElementById("targetsList");
       const enabledCount = document.getElementById("enabledCount");
       const balanceInfo = document.getElementById("balanceInfo");
+      const claimBalanceBtn = document.getElementById("claimBalanceBtn");
 
       const tradeStatus = document.getElementById("tradeStatus");
       const tradeTarget = document.getElementById("tradeTarget");
@@ -642,6 +662,13 @@
         if (!Number.isFinite(n)) return "-";
         return n.toFixed(d);
       };
+      const escapeHtml = (v) =>
+        String(v ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
 
       const fmtTime = (iso) => {
         if (!iso) return "-";
@@ -707,6 +734,12 @@
         document.getElementById("sWinRate").textContent = `${(winRate * 100).toFixed(2)}%`;
       }
 
+      const fmtUsd = (v, d = 4) => {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return "-";
+        return `$${n.toFixed(d)}`;
+      };
+
       function renderTrades(items) {
         tradesBody.innerHTML = "";
         if (!Array.isArray(items) || items.length === 0) {
@@ -718,18 +751,28 @@
 
         for (const t of items) {
           const tr = document.createElement("tr");
-          const targetLabel = t.targetId || `${t.coin || "-"}_${Number(t.horizonMin) === 60 ? "1h" : `${t.horizonMin || "-"}m`}`;
+          const targetLabel = t.marketTitle || t.targetId || `${t.coin || "-"}_${Number(t.horizonMin) === 60 ? "1h" : `${t.horizonMin || "-"}m`}`;
+          const marketUrl = typeof t.marketUrl === "string" ? t.marketUrl.trim() : "";
+          const safeLabel = escapeHtml(targetLabel);
+          const linkHtml = marketUrl
+            ? `<a class="market-link" href="${encodeURI(marketUrl)}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`
+            : safeLabel;
           let badgeClass = "pending";
           if (t.status === "WIN") badgeClass = "win";
           if (t.status === "LOSE") badgeClass = "lose";
+          const mode = t.executionMode === "DRY_RUN" ? "DRY_RUN" : "LIVE";
+          const modeClass = mode === "DRY_RUN" ? "mode-dry" : "mode-live";
+          const entryPrice = t.entryPrice == null ? null : Number(t.entryPrice);
+          const settleRef = t.settleRefPrice == null ? null : Number(t.settleRefPrice);
+          const sideText = t.side === "YES" ? "UP (YES)" : t.side === "NO" ? "DOWN (NO)" : "-";
           tr.innerHTML = `
-            <td>${fmtTime(t.entryTime)}</td>
-            <td>${targetLabel}</td>
-            <td>${t.side || "-"}</td>
+            <td title="${safeLabel}" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${linkHtml}</td>
+            <td>${sideText}</td>
             <td><span class="badge ${badgeClass}">${t.status || "PENDING"}</span></td>
-            <td>${fmtNumber(t.entryRefPrice, 6)}</td>
-            <td>${t.settleRefPrice == null ? "-" : fmtNumber(t.settleRefPrice, 6)}</td>
-            <td title="${t.marketId || ""}" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.marketId || "-"}</td>
+            <td><span class="badge ${modeClass}">${mode}</span></td>
+            <td>${entryPrice == null || !Number.isFinite(entryPrice) ? "-" : fmtUsd(entryPrice, 4)}</td>
+            <td>${settleRef == null || !Number.isFinite(settleRef) ? "-" : fmtNumber(settleRef, 6)}</td>
+            <td>${fmtTime(t.entryTime)}</td>
           `;
           tradesBody.appendChild(tr);
         }
@@ -888,13 +931,38 @@
           const resp = await fetch("/api/account");
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          const equity = Number(data?.totalEquityUsd ?? 0);
-          const collateral = Number(data?.collateralUsdc ?? 0);
-          const user = data?.user || "-";
-          const msg = `当前总资产≈$${equity.toFixed(2)} (可用USDC≈$${collateral.toFixed(2)}) | ${user}`;
-          balanceInfo.textContent = data?.collateralError ? `${msg} | ${data.collateralError}` : msg;
+          balanceInfo.textContent = formatAccountText(data);
         } catch (err) {
           balanceInfo.textContent = `余额读取失败: ${String(err)}`;
+        }
+      }
+
+      function formatAccountText(data) {
+        const equity = Number(data?.totalEquityUsd ?? 0);
+        const collateral = Number(data?.collateralUsdc ?? 0);
+        const user = data?.user || "-";
+        const msg = `当前总资产≈$${equity.toFixed(2)} (可用USDC≈$${collateral.toFixed(2)}) | ${user}`;
+        return data?.collateralError ? `${msg} | ${data.collateralError}` : msg;
+      }
+
+      async function claimRewards() {
+        if (!claimBalanceBtn) return;
+        try {
+          claimBalanceBtn.disabled = true;
+          balanceInfo.textContent = "赎回执行中...";
+          const resp = await fetch("/api/account/claim", { method: "POST" });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          const claim = data?.claim || {};
+          const reason = claim?.reason ? `, ${claim.reason}` : "";
+          const accountText = formatAccountText(data?.account || {});
+          balanceInfo.textContent = `${accountText} | 赎回: 成功${claim?.success ?? 0}/失败${claim?.failed ?? 0}, 条件${claim?.conditions ?? 0}${reason}`;
+          tradeQuery.page = 1;
+          await loadTrades();
+        } catch (err) {
+          balanceInfo.textContent = `赎回失败: ${String(err)}`;
+        } finally {
+          claimBalanceBtn.disabled = false;
         }
       }
 
@@ -934,6 +1002,7 @@
       document.getElementById("refreshTradesBtn").addEventListener("click", loadTrades);
       document.getElementById("clearTradesBtn").addEventListener("click", clearTrades);
       document.getElementById("refreshBalanceBtn").addEventListener("click", loadAccount);
+      document.getElementById("claimBalanceBtn").addEventListener("click", claimRewards);
       tabButtons.forEach((btn) => {
         btn.addEventListener("click", () => {
           const tab = btn.getAttribute("data-tab") || "runtime";

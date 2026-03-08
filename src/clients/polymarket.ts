@@ -78,6 +78,64 @@ export class PolymarketTrader {
     return this.client.getBalanceAllowance(payload);
   }
 
+  async getOrder(orderId: string): Promise<any> {
+    if (!this.client) {
+      throw new Error("Polymarket client unavailable");
+    }
+    if (typeof this.client.getOrder !== "function") {
+      throw new Error("Clob client does not support getOrder");
+    }
+    return this.client.getOrder(orderId);
+  }
+
+  async getTrades(params?: Record<string, string>): Promise<any[]> {
+    if (!this.client) {
+      throw new Error("Polymarket client unavailable");
+    }
+    if (typeof this.client.getTrades !== "function") {
+      throw new Error("Clob client does not support getTrades");
+    }
+    const rows = await this.client.getTrades(params ?? {});
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  async getAverageFillPrice(orderId: string, fallback: number): Promise<number> {
+    let fallbackPrice = fallback;
+    let tradeIds: string[] = [];
+    try {
+      const order = await this.getOrder(orderId);
+      const orderPx = Number(order?.price);
+      if (Number.isFinite(orderPx) && orderPx > 0) {
+        fallbackPrice = orderPx;
+      }
+      const assoc = Array.isArray(order?.associate_trades) ? order.associate_trades : [];
+      tradeIds = assoc.map((x: unknown) => String(x)).filter(Boolean);
+    } catch {
+      // use fallback
+    }
+
+    if (tradeIds.length === 0) return fallbackPrice;
+
+    let totalPxSize = 0;
+    let totalSize = 0;
+    for (const id of tradeIds) {
+      try {
+        const rows = await this.getTrades({ id });
+        const t = rows.find((x) => String(x?.id || "") === id) ?? rows[0];
+        const px = Number(t?.price);
+        const sz = Number(t?.size);
+        if (!Number.isFinite(px) || !Number.isFinite(sz) || sz <= 0) continue;
+        totalPxSize += px * sz;
+        totalSize += sz;
+      } catch {
+        continue;
+      }
+    }
+
+    if (totalSize > 0) return totalPxSize / totalSize;
+    return fallbackPrice;
+  }
+
   async placeBuyOrder(input: {
     tokenId: string;
     price: number;

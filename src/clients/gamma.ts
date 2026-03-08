@@ -116,8 +116,19 @@ export class GammaClient {
 
       const tokensFromField = Array.isArray(m.tokens) ? m.tokens : [];
 
-      const yesIdx = this.findOutcomeIdx(outcomes, ["yes", "up", "higher", "above"]);
-      const noIdx = this.findOutcomeIdx(outcomes, ["no", "down", "lower", "below"]);
+      let yesIdx = this.findOutcomeIdx(outcomes, ["yes", "up", "higher", "above"]);
+      let noIdx = this.findOutcomeIdx(outcomes, ["no", "down", "lower", "below"]);
+
+      // 避免 outcome 映射歧义：只在能明确识别 yes/no(up/down) 时才交易。
+      if (yesIdx < 0 && noIdx >= 0 && outcomes.length === 2) {
+        yesIdx = noIdx === 0 ? 1 : 0;
+      }
+      if (noIdx < 0 && yesIdx >= 0 && outcomes.length === 2) {
+        noIdx = yesIdx === 0 ? 1 : 0;
+      }
+      if (yesIdx < 0 || noIdx < 0 || yesIdx === noIdx) {
+        continue;
+      }
 
       const yesTokenId =
         (yesIdx >= 0 ? clobTokenIds[yesIdx] : undefined) ??

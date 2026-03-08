@@ -4,6 +4,8 @@ import path from "node:path";
 import type { BotState, LiveTradeRecord } from "../types.js";
 import { isoNow } from "../utils.js";
 
+type TradeModeFilter = "LIVE" | "DRY_RUN" | "ALL";
+
 export class StateStore {
   private readonly filePath: string;
 
@@ -61,10 +63,10 @@ export class StateStore {
     this.save(state);
   }
 
-  canTradeByCooldown(cooldownSeconds: number, targetId?: string): boolean {
+  canTradeByCooldown(cooldownSeconds: number, targetId?: string, mode: TradeModeFilter = "ALL"): boolean {
     if (cooldownSeconds <= 0) return true;
     const state = this.load();
-    const trades = state.trades ?? [];
+    const trades = (state.trades ?? []).filter((x) => this.matchesMode(x, mode));
 
     if (targetId) {
       let latestMs = NaN;
@@ -78,14 +80,22 @@ export class StateStore {
       return Date.now() - latestMs >= cooldownSeconds * 1000;
     }
 
-    if (!state.lastTradeAt) return true;
-    const elapsed = Date.now() - new Date(state.lastTradeAt).getTime();
-    return elapsed >= cooldownSeconds * 1000;
+    if (trades.length === 0) return true;
+    let latestMs = NaN;
+    for (let i = trades.length - 1; i >= 0; i -= 1) {
+      const t = Date.parse(trades[i].entryTime);
+      if (!Number.isFinite(t)) continue;
+      latestMs = t;
+      break;
+    }
+    if (!Number.isFinite(latestMs)) return true;
+    return Date.now() - latestMs >= cooldownSeconds * 1000;
   }
 
   async settleDueTrades(
     settleBufferMs: number,
     resolver: (trade: LiveTradeRecord) => Promise<number | null>,
+    mode: TradeModeFilter = "ALL",
   ): Promise<void> {
     const state = this.load();
     const trades = state.trades ?? [];
@@ -94,6 +104,7 @@ export class StateStore {
 
     for (const t of trades) {
       if (t.resolved) continue;
+      if (!this.matchesMode(t, mode)) continue;
       const settleMs = Date.parse(t.settleTime);
       if (!Number.isFinite(settleMs)) continue;
       if (nowMs < settleMs + settleBufferMs) continue;
@@ -105,6 +116,7 @@ export class StateStore {
       t.settleRefPrice = settleRefPrice;
       t.win = (t.side === "YES") === up;
       t.resolved = true;
+      t.settlementSource = "BINANCE_PROXY";
       changed = true;
     }
 
@@ -114,18 +126,18 @@ export class StateStore {
     }
   }
 
-  getPerformanceSummary(): {
+  getPerformanceSummary(mode: TradeModeFilter = "ALL"): {
     totalTrades: number;
     settledTrades: number;
     wins: number;
     winRate: number;
   } {
     const state = this.load();
-    const trades = state.trades ?? [];
+    const trades = (state.trades ?? []).filter((x) => this.matchesMode(x, mode));
     return this.summarize(trades);
   }
 
-  getPerformanceSummarySince(startTime: string): {
+  getPerformanceSummarySince(startTime: string, mode: TradeModeFilter = "ALL"): {
     totalTrades: number;
     settledTrades: number;
     wins: number;
@@ -134,6 +146,7 @@ export class StateStore {
     const startMs = Date.parse(startTime);
     const state = this.load();
     const trades = (state.trades ?? []).filter((x) => {
+      if (!this.matchesMode(x, mode)) return false;
       const t = Date.parse(x.entryTime);
       if (!Number.isFinite(startMs) || !Number.isFinite(t)) return false;
       return t >= startMs;
@@ -141,24 +154,25 @@ export class StateStore {
     return this.summarize(trades);
   }
 
-  getTradeCountSince(startTime: string): number {
+  getTradeCountSince(startTime: string, mode: TradeModeFilter = "ALL"): number {
     const startMs = Date.parse(startTime);
     if (!Number.isFinite(startMs)) return 0;
     const state = this.load();
     return (state.trades ?? []).filter((x) => {
+      if (!this.matchesMode(x, mode)) return false;
       const t = Date.parse(x.entryTime);
       return Number.isFinite(t) && t >= startMs;
     }).length;
   }
 
-  getOpenTradeCount(): number {
+  getOpenTradeCount(mode: TradeModeFilter = "ALL"): number {
     const state = this.load();
-    return (state.trades ?? []).filter((x) => !x.resolved).length;
+    return (state.trades ?? []).filter((x) => this.matchesMode(x, mode) && !x.resolved).length;
   }
 
-  getConsecutiveLosses(): number {
+  getConsecutiveLosses(mode: TradeModeFilter = "ALL"): number {
     const state = this.load();
-    const trades = state.trades ?? [];
+    const trades = (state.trades ?? []).filter((x) => this.matchesMode(x, mode));
     let losses = 0;
     for (let i = trades.length - 1; i >= 0; i -= 1) {
       const t = trades[i];
@@ -183,5 +197,17 @@ export class StateStore {
       wins,
       winRate: settled.length > 0 ? wins / settled.length : 0,
     };
+  }
+
+  private normalizeMode(trade: LiveTradeRecord): "LIVE" | "DRY_RUN" {
+    if (trade.executionMode === "LIVE" || trade.executionMode === "DRY_RUN") {
+      return trade.executionMode;
+    }
+    return trade.orderId && String(trade.orderId).trim() ? "LIVE" : "DRY_RUN";
+  }
+
+  private matchesMode(trade: LiveTradeRecord, mode: TradeModeFilter): boolean {
+    if (mode === "ALL") return true;
+    return this.normalizeMode(trade) === mode;
   }
 }

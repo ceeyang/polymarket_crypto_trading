@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import axios from "axios";
+import { Wallet } from "ethers";
 
 import { MAX_TARGETS, loadConfig, readRuntimeConfig, type Config, type MarketTarget } from "./config.js";
 import { BinanceClient } from "./clients/binance.js";
@@ -78,6 +80,445 @@ function rawUsdcToNumber(raw: unknown): number {
   return n / 1_000_000;
 }
 
+function normalizeConditionId(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(v)) return null;
+  return v;
+}
+
+function parseFinite(raw: unknown): number | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+function parseOutcomeWin(side: "YES" | "NO", raw: string): boolean | null {
+  const s = raw.trim().toLowerCase();
+  if (!s) return null;
+  const yesTokens = ["yes", "up", "higher", "above", "win", "won", "true", "1"];
+  const noTokens = ["no", "down", "lower", "below", "lose", "lost", "false", "0"];
+  if (yesTokens.some((x) => s.includes(x))) return side === "YES";
+  if (noTokens.some((x) => s.includes(x))) return side === "NO";
+  return null;
+}
+
+function parseStringArray(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map((x) => String(x));
+  if (typeof raw !== "string") return [];
+  const text = raw.trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed.map((x) => String(x));
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function parseNumberArray(raw: unknown): number[] {
+  return parseStringArray(raw)
+    .map((x) => Number(x))
+    .filter((x) => Number.isFinite(x));
+}
+
+function findOutcomeIdx(outcomes: string[], keywords: string[]): number {
+  for (let i = 0; i < outcomes.length; i += 1) {
+    const s = outcomes[i]?.toLowerCase?.() ?? "";
+    if (!s) continue;
+    if (keywords.some((k) => s.includes(k))) return i;
+  }
+  return -1;
+}
+
+function sideToOutcomeIdx(side: "YES" | "NO", outcomes: string[]): number | null {
+  if (!outcomes.length) return null;
+  let yesIdx = findOutcomeIdx(outcomes, ["yes", "up", "higher", "above", "win", "true"]);
+  let noIdx = findOutcomeIdx(outcomes, ["no", "down", "lower", "below", "lose", "false"]);
+
+  if (yesIdx < 0 && noIdx >= 0 && outcomes.length === 2) {
+    yesIdx = noIdx === 0 ? 1 : 0;
+  }
+  if (noIdx < 0 && yesIdx >= 0 && outcomes.length === 2) {
+    noIdx = yesIdx === 0 ? 1 : 0;
+  }
+  if (yesIdx < 0 || noIdx < 0 || yesIdx === noIdx) return null;
+  return side === "YES" ? yesIdx : noIdx;
+}
+
+interface GammaSettlementParse {
+  resolved: boolean;
+  winnerIdx: number | null;
+  winnerLabel: string | null;
+  winnerPrice: number | null;
+  outcomes: string[];
+}
+
+function parseGammaSettlement(row: any): GammaSettlementParse {
+  const outcomes = parseStringArray(row?.outcomes);
+  const prices = parseNumberArray(
+    row?.outcomePrices
+    ?? row?.outcome_prices
+    ?? row?.resolutionPrices
+    ?? row?.resolution_prices
+    ?? row?.finalOutcomePrices
+    ?? row?.final_outcome_prices,
+  );
+
+  const explicitWinnerIdxRaw =
+    row?.winningOutcomeIndex
+    ?? row?.winning_outcome_index
+    ?? row?.winnerIndex
+    ?? row?.winner_index;
+  const explicitWinnerIdx = Number(explicitWinnerIdxRaw);
+  if (Number.isInteger(explicitWinnerIdx) && explicitWinnerIdx >= 0) {
+    const idx = explicitWinnerIdx;
+    const winnerLabel = idx < outcomes.length ? outcomes[idx] : null;
+    const winnerPrice = idx < prices.length ? prices[idx] : null;
+    return { resolved: true, winnerIdx: idx, winnerLabel, winnerPrice, outcomes };
+  }
+
+  const explicitWinnerTextRaw =
+    row?.winningOutcome
+    ?? row?.winning_outcome
+    ?? row?.winner
+    ?? row?.resolvedOutcome
+    ?? row?.resolved_outcome
+    ?? row?.result;
+  if (typeof explicitWinnerTextRaw === "string" && explicitWinnerTextRaw.trim()) {
+    const winnerText = explicitWinnerTextRaw.trim().toLowerCase();
+    const idx = outcomes.findIndex((x) => x.toLowerCase() === winnerText || x.toLowerCase().includes(winnerText));
+    if (idx >= 0) {
+      const winnerPrice = idx < prices.length ? prices[idx] : null;
+      return { resolved: true, winnerIdx: idx, winnerLabel: outcomes[idx], winnerPrice, outcomes };
+    }
+    return { resolved: true, winnerIdx: null, winnerLabel: explicitWinnerTextRaw, winnerPrice: null, outcomes };
+  }
+
+  if (prices.length > 0) {
+    let bestIdx = -1;
+    let best = -Infinity;
+    let second = -Infinity;
+    for (let i = 0; i < prices.length; i += 1) {
+      const p = prices[i];
+      if (p > best) {
+        second = best;
+        best = p;
+        bestIdx = i;
+      } else if (p > second) {
+        second = p;
+      }
+    }
+    if (bestIdx >= 0) {
+      const confidentlyResolved = best >= 0.999 || (best - Math.max(second, 0)) >= 0.98;
+      if (confidentlyResolved) {
+        const winnerLabel = bestIdx < outcomes.length ? outcomes[bestIdx] : null;
+        return { resolved: true, winnerIdx: bestIdx, winnerLabel, winnerPrice: best, outcomes };
+      }
+    }
+  }
+
+  const status = String(row?.umaResolutionStatus ?? row?.uma_resolution_status ?? "").toLowerCase();
+  const isResolvedByStatus = status === "resolved" || status === "finalized" || status === "settled";
+  if (isResolvedByStatus) {
+    return { resolved: true, winnerIdx: null, winnerLabel: null, winnerPrice: null, outcomes };
+  }
+  return { resolved: false, winnerIdx: null, winnerLabel: null, winnerPrice: null, outcomes };
+}
+
+function pickUserAddress(cfg: Config): string | null {
+  if (cfg.funderAddress && cfg.funderAddress.trim()) return cfg.funderAddress.trim();
+  if (!cfg.privateKey) return null;
+  try {
+    return new Wallet(cfg.privateKey).address;
+  } catch {
+    return null;
+  }
+}
+
+interface ClosedPositionSnapshot {
+  conditionId: string;
+  marketId: string | null;
+  pnlUsd: number | null;
+  settlementPrice: number | null;
+  outcomeText: string | null;
+  closedAtMs: number;
+}
+
+async function fetchClosedPositionsMap(
+  cfg: Config,
+  user: string,
+): Promise<{ byCondition: Map<string, ClosedPositionSnapshot>; byMarketId: Map<string, ClosedPositionSnapshot> }> {
+  const endpoints = [
+    { path: "/closed-positions", params: { user, size: 1000 } },
+    { path: "/closed_positions", params: { user, size: 1000 } },
+    { path: "/positions", params: { user, size: 1000, closed: true } },
+  ];
+
+  let rows: any[] = [];
+  for (const ep of endpoints) {
+    try {
+      const { data } = await axios.get(`${cfg.dataApiHost}${ep.path}`, {
+        params: ep.params,
+        timeout: 20_000,
+      });
+      const arr = Array.isArray(data) ? data : (Array.isArray((data as any)?.data) ? (data as any).data : []);
+      if (Array.isArray(arr)) {
+        rows = arr;
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const byCondition = new Map<string, ClosedPositionSnapshot>();
+  const byMarketId = new Map<string, ClosedPositionSnapshot>();
+  for (const r of rows) {
+    const conditionId = normalizeConditionId(r?.conditionId ?? r?.condition_id ?? r?.condition);
+    if (!conditionId) continue;
+    const marketRaw = r?.marketId ?? r?.market_id ?? r?.market ?? r?.id;
+    const marketId = marketRaw == null ? null : String(marketRaw).trim();
+
+    const closedAtMs = Date.parse(
+      String(
+        r?.closedAt
+        ?? r?.closed_at
+        ?? r?.resolvedAt
+        ?? r?.resolved_at
+        ?? r?.endDate
+        ?? r?.end_date
+        ?? r?.updatedAt
+        ?? r?.updated_at
+        ?? 0,
+      ),
+    );
+
+    const pnlUsd = parseFinite(
+      r?.realizedPnl
+      ?? r?.realized_pnl
+      ?? r?.pnl
+      ?? r?.profit
+      ?? r?.usdPnl
+      ?? r?.usdcPnl,
+    );
+
+    const settlementPrice = parseFinite(
+      r?.settlementPrice
+      ?? r?.settlement_price
+      ?? r?.resolutionPrice
+      ?? r?.resolution_price
+      ?? r?.finalPrice
+      ?? r?.final_price,
+    );
+
+    const outcomeRaw = r?.outcome ?? r?.resolvedOutcome ?? r?.resolved_outcome ?? r?.result;
+    const outcomeText = typeof outcomeRaw === "string" ? outcomeRaw : null;
+
+    const prev = byCondition.get(conditionId);
+    const ts = Number.isFinite(closedAtMs) ? closedAtMs : 0;
+    if (!prev || ts >= prev.closedAtMs) {
+      byCondition.set(conditionId, {
+        conditionId,
+        marketId: marketId || null,
+        pnlUsd,
+        settlementPrice,
+        outcomeText,
+        closedAtMs: ts,
+      });
+    }
+  }
+
+  for (const row of byCondition.values()) {
+    if (!row.marketId) continue;
+    const prev = byMarketId.get(row.marketId);
+    if (!prev || row.closedAtMs >= prev.closedAtMs) {
+      byMarketId.set(row.marketId, row);
+    }
+  }
+
+  return { byCondition, byMarketId };
+}
+
+async function settleLiveTradesWithOfficial(cfg: Config, state: StateStore, settleBufferMs: number): Promise<{ due: number; resolved: number }> {
+  const snapshot = state.load();
+  const trades = snapshot.trades ?? [];
+  const nowMs = Date.now();
+  const dueLive = trades.filter((t) => {
+    const mode = t.executionMode ?? (t.orderId ? "LIVE" : "DRY_RUN");
+    if (mode !== "LIVE") return false;
+    if (t.resolved) return false;
+    const settleMs = Date.parse(t.settleTime);
+    if (!Number.isFinite(settleMs)) return false;
+    if (nowMs < settleMs + settleBufferMs) return false;
+    return true;
+  });
+  if (!dueLive.length) return { due: 0, resolved: 0 };
+
+  const user = pickUserAddress(cfg);
+  if (!user) return { due: dueLive.length, resolved: 0 };
+
+  const closed = await fetchClosedPositionsMap(cfg, user);
+  if (!closed.byCondition.size && !closed.byMarketId.size) return { due: dueLive.length, resolved: 0 };
+
+  let changed = false;
+  let resolved = 0;
+  for (const t of dueLive) {
+    const cid = normalizeConditionId(t.conditionId);
+    const row = (cid ? closed.byCondition.get(cid) : undefined)
+      ?? closed.byMarketId.get(String(t.marketId));
+    if (!row) continue;
+
+    let win: boolean;
+    if (row.pnlUsd != null && Math.abs(row.pnlUsd) > 1e-9) {
+      win = row.pnlUsd > 0;
+    } else {
+      const inferred = row.outcomeText ? parseOutcomeWin(t.side, row.outcomeText) : null;
+      win = inferred ?? false;
+    }
+
+    t.resolved = true;
+    t.win = win;
+    if (row.settlementPrice != null) t.settleRefPrice = row.settlementPrice;
+    if (row.pnlUsd != null) t.officialPnlUsd = Number(row.pnlUsd.toFixed(6));
+    t.settlementSource = "POLYMARKET_OFFICIAL";
+    changed = true;
+    resolved += 1;
+  }
+
+  if (changed) {
+    snapshot.trades = trades;
+    state.save(snapshot);
+  }
+  return { due: dueLive.length, resolved };
+}
+
+async function fetchGammaMarketById(cfg: Config, marketId: string): Promise<any | null> {
+  try {
+    const { data } = await axios.get(`${cfg.gammaHost}/markets/${encodeURIComponent(marketId)}`, { timeout: 15_000 });
+    if (data && typeof data === "object" && !Array.isArray(data)) return data;
+    if (data?.data && typeof data.data === "object" && !Array.isArray(data.data)) return data.data;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function settleDryRunTradesWithOfficial(
+  cfg: Config,
+  state: StateStore,
+  settleBufferMs: number,
+): Promise<{ due: number; resolved: number; reconciled: number }> {
+  const snapshot = state.load();
+  const trades = snapshot.trades ?? [];
+  const nowMs = Date.now();
+
+  const dueDry = trades.filter((t) => {
+    const mode = t.executionMode ?? (t.orderId ? "LIVE" : "DRY_RUN");
+    if (mode !== "DRY_RUN") return false;
+    const settleMs = Date.parse(t.settleTime);
+    if (!Number.isFinite(settleMs)) return false;
+    if (nowMs < settleMs + settleBufferMs) return false;
+    if (!t.marketId || !String(t.marketId).trim()) return false;
+    return !t.resolved || t.settlementSource !== "POLYMARKET_OFFICIAL";
+  });
+  if (!dueDry.length) return { due: 0, resolved: 0, reconciled: 0 };
+
+  const marketCache = new Map<string, any | null>();
+  for (const t of dueDry) {
+    const marketId = String(t.marketId);
+    if (marketCache.has(marketId)) continue;
+    const market = await fetchGammaMarketById(cfg, marketId);
+    marketCache.set(marketId, market);
+  }
+
+  let changed = false;
+  let resolved = 0;
+  let reconciled = 0;
+  for (const t of dueDry) {
+    const market = marketCache.get(String(t.marketId)) ?? null;
+    if (!market) continue;
+
+    const settlement = parseGammaSettlement(market);
+    if (!settlement.resolved) continue;
+
+    let win: boolean | null = null;
+    if (settlement.winnerIdx != null) {
+      const sideIdx = sideToOutcomeIdx(t.side, settlement.outcomes);
+      if (sideIdx != null) win = sideIdx === settlement.winnerIdx;
+    }
+    if (win == null && settlement.winnerLabel) {
+      win = parseOutcomeWin(t.side, settlement.winnerLabel);
+    }
+    if (win == null) continue;
+
+    const wasResolved = Boolean(t.resolved);
+    const wasOfficial = t.settlementSource === "POLYMARKET_OFFICIAL";
+    const wasWin = t.win;
+
+    t.resolved = true;
+    t.win = win;
+    if (settlement.winnerPrice != null && Number.isFinite(settlement.winnerPrice)) {
+      t.settleRefPrice = settlement.winnerPrice;
+    }
+    t.settlementSource = "POLYMARKET_OFFICIAL";
+
+    const changedNow =
+      !wasResolved
+      || !wasOfficial
+      || wasWin !== win;
+    if (changedNow) {
+      changed = true;
+      if (!wasResolved) {
+        resolved += 1;
+      } else {
+        reconciled += 1;
+      }
+    }
+  }
+
+  if (changed) {
+    snapshot.trades = trades;
+    state.save(snapshot);
+  }
+  return { due: dueDry.length, resolved, reconciled };
+}
+
+function toFiniteNumber(raw: unknown, fallback = NaN): number {
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+async function waitForMatchedSize(
+  trader: PolymarketTrader,
+  orderId: string,
+): Promise<{ matchedSize: number; status: string }> {
+  let status = "UNKNOWN";
+  let matchedSize = 0;
+
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const ord = await trader.getOrder(orderId);
+      status = String(ord?.status ?? status);
+      matchedSize = Math.max(0, toFiniteNumber(ord?.size_matched ?? ord?.sizeMatched ?? 0, 0));
+      if (matchedSize > 0) {
+        return { matchedSize, status };
+      }
+      const s = status.toUpperCase();
+      if (s === "CANCELED" || s === "CANCELLED" || s === "EXPIRED" || s === "REJECTED") {
+        return { matchedSize, status };
+      }
+    } catch {
+      // retry on eventual-consistency / temporary request failure
+    }
+    if (i < 2) {
+      await sleep(400);
+    }
+  }
+  return { matchedSize, status };
+}
+
 function startOfLocalDayIso(now = new Date()): string {
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);
@@ -90,6 +531,8 @@ interface PreparedOrder {
   symbol: string;
   best: {
     marketId: string;
+    conditionId: string;
+    title: string;
     endDate: string;
     liquidity: number;
     yesPrice: number;
@@ -253,8 +696,8 @@ export async function startBot(): Promise<void> {
     }
   };
 
-  const initialPerfAll = state.getPerformanceSummary();
-  const initialPerfSession = state.getPerformanceSummarySince(sessionStartedAt);
+  const initialPerfAll = state.getPerformanceSummary("ALL");
+  const initialPerfSession = state.getPerformanceSummarySince(sessionStartedAt, "ALL");
   let lastSummaryKey = JSON.stringify({
     totalTrades: initialPerfAll.totalTrades,
     settledTrades: initialPerfAll.settledTrades,
@@ -274,11 +717,17 @@ export async function startBot(): Promise<void> {
       const currentRuntime = await reloadRuntime("round_begin");
       const { cfg, gamma, trader, activeTargets, targetModels } = currentRuntime;
 
-      await state.settleDueTrades(90_000, async (t) => {
-        const settleMs = Date.parse(t.settleTime);
-        if (!Number.isFinite(settleMs)) return null;
-        return binance.getCloseNearTime(t.symbol || "ETHUSDT", settleMs);
-      });
+      if (!cfg.dryRun) {
+        const official = await settleLiveTradesWithOfficial(cfg, state, 90_000);
+        if (official.resolved > 0) {
+          log("official settlement synced", official);
+        }
+      }
+
+      const dryRunOfficial = await settleDryRunTradesWithOfficial(cfg, state, 0);
+      if (dryRunOfficial.resolved > 0 || dryRunOfficial.reconciled > 0) {
+        log("dry-run official settlement synced", dryRunOfficial);
+      }
 
       if (cfg.autoClaim && !cfg.dryRun && !autoClaimInFlight) {
         const nowMs = Date.now();
@@ -342,8 +791,9 @@ export async function startBot(): Promise<void> {
         }
       }
 
-      const perfAll = state.getPerformanceSummary();
-      const perfSession = state.getPerformanceSummarySince(sessionStartedAt);
+      const perfMode = cfg.dryRun ? "DRY_RUN" : "LIVE";
+      const perfAll = state.getPerformanceSummary(perfMode);
+      const perfSession = state.getPerformanceSummarySince(sessionStartedAt, perfMode);
       const summaryPayload = {
         totalTrades: perfAll.totalTrades,
         settledTrades: perfAll.settledTrades,
@@ -360,9 +810,9 @@ export async function startBot(): Promise<void> {
         lastSummaryKey = summaryKey;
       }
 
-      const openTrades = state.getOpenTradeCount();
-      const tradesToday = state.getTradeCountSince(startOfLocalDayIso());
-      const consecutiveLosses = state.getConsecutiveLosses();
+      const openTrades = state.getOpenTradeCount(perfMode);
+      const tradesToday = state.getTradeCountSince(startOfLocalDayIso(), perfMode);
+      const consecutiveLosses = state.getConsecutiveLosses(perfMode);
 
       if (cfg.maxConsecutiveLosses > 0 && consecutiveLosses >= cfg.maxConsecutiveLosses) {
         log("risk stop triggered: max consecutive losses reached", {
@@ -431,7 +881,7 @@ export async function startBot(): Promise<void> {
           const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
           if (!best) return null;
 
-          if (!state.canTradeByCooldown(cfg.cooldownSeconds, target.id)) {
+          if (!state.canTradeByCooldown(cfg.cooldownSeconds, target.id, perfMode)) {
             log(`[${label}] skip: cooldown active (${cfg.cooldownSeconds}s)`);
             return null;
           }
@@ -487,13 +937,15 @@ export async function startBot(): Promise<void> {
 
       for (const order of readyOrders) {
         if (tradedMarketIds.has(order.best.marketId)) continue;
-        if (!state.canTradeByCooldown(cfg.cooldownSeconds, order.target.id)) {
+        if (!state.canTradeByCooldown(cfg.cooldownSeconds, order.target.id, perfMode)) {
           log(`[${order.label}] skip: cooldown active (${cfg.cooldownSeconds}s)`);
           continue;
         }
 
         log(`[${order.label}] selected market`, {
           marketId: order.best.marketId,
+          conditionId: order.best.conditionId,
+          title: order.best.title,
           endDate: order.best.endDate,
           liquidity: order.best.liquidity,
           yesPrice: order.best.yesPrice,
@@ -511,18 +963,76 @@ export async function startBot(): Promise<void> {
         });
 
         log(`[${order.label}] order response`, response);
+        if (response?.dryRun || cfg.dryRun) {
+          state.recordTrade({
+            marketId: order.best.marketId,
+            conditionId: order.best.conditionId,
+            marketTitle: order.best.title,
+            targetId: order.target.id,
+            coin: order.target.coin,
+            horizonMin: order.target.horizonMin,
+            symbol: order.symbol,
+            side: order.decision.side,
+            executionMode: "DRY_RUN",
+            entryTime: new Date().toISOString(),
+            settleTime: order.best.endDate,
+            entryRefPrice: order.entryRefPrice,
+            entryPrice: order.decision.limitPrice,
+            entryNotionalUsd: Number((order.decision.limitPrice * order.decision.shareSize).toFixed(6)),
+            resolved: false,
+            orderStatus: "DRY_RUN",
+          });
+          log(`[${order.label}] dry-run trade recorded`, {
+            marketId: order.best.marketId,
+            title: order.best.title,
+            side: order.decision.side,
+            entryPrice: order.decision.limitPrice,
+          });
+          tradedMarketIds.add(order.best.marketId);
+          continue;
+        }
+
+        const orderIdRaw = response?.orderID ?? response?.orderId ?? response?.id;
+        const orderId = orderIdRaw ? String(orderIdRaw) : undefined;
+        if (!orderId) {
+          log(`[${order.label}] skip record: missing order id`, response);
+          tradedMarketIds.add(order.best.marketId);
+          continue;
+        }
+
+        const fill = await waitForMatchedSize(trader, orderId);
+        if (fill.matchedSize <= 0) {
+          log(`[${order.label}] skip record: order not filled`, {
+            orderId,
+            status: fill.status,
+            matchedSize: fill.matchedSize,
+          });
+          tradedMarketIds.add(order.best.marketId);
+          continue;
+        }
+
+        const entryPrice = await trader.getAverageFillPrice(orderId, order.decision.limitPrice)
+          .catch(() => order.decision.limitPrice);
+
         state.recordTrade({
           marketId: order.best.marketId,
+          conditionId: order.best.conditionId,
+          marketTitle: order.best.title,
           targetId: order.target.id,
           coin: order.target.coin,
           horizonMin: order.target.horizonMin,
           symbol: order.symbol,
           side: order.decision.side,
+          executionMode: "LIVE",
           entryTime: new Date().toISOString(),
           settleTime: order.best.endDate,
           entryRefPrice: order.entryRefPrice,
+          entryPrice,
+          entryNotionalUsd: Number((entryPrice * fill.matchedSize).toFixed(6)),
           resolved: false,
-          orderId: response?.orderID ? String(response.orderID) : undefined,
+          orderId,
+          matchedSize: fill.matchedSize,
+          orderStatus: fill.status,
         });
         tradedMarketIds.add(order.best.marketId);
       }

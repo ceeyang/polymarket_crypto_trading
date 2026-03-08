@@ -259,8 +259,9 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
       .filter((x: string | null): x is string => Boolean(x))
       .filter((x: string) => (whitelist.size ? whitelist.has(x.toLowerCase()) : true)),
   ));
+  const totalConditions = conditionIds.length;
 
-  if (conditionIds.length === 0) {
+  if (totalConditions === 0) {
     if (!quietNoop) {
       log(logPrefix, "no redeemable condition ids found", { user, redeemablePositions: redeemable.length });
     }
@@ -284,7 +285,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   log(logPrefix, "targets", {
     user,
-    conditions: conditionIds.length,
+    conditions: totalConditions,
     dryRun: cfg.dryRun,
     relayerHost: cfg.relayerHost,
     relayerTxType: cfg.relayerTxType,
@@ -295,7 +296,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     return {
       user,
       redeemablePositions: redeemable.length,
-      conditions: conditionIds.length,
+      conditions: totalConditions,
       success: 0,
       failed: 0,
       dryRun: true,
@@ -336,7 +337,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   const summary: ClaimRunSummary = {
     user,
     redeemablePositions: redeemable.length,
-    conditions: conditionIds.length,
+    conditions: totalConditions,
     success,
     failed,
     dryRun: cfg.dryRun,

@@ -66,18 +66,27 @@ export interface TradeDecision {
 
 export interface LiveTradeRecord {
   marketId: string;
+  conditionId?: string;
+  marketTitle?: string;
   targetId?: string;
   coin?: string;
   horizonMin?: number;
   symbol?: string;
   side: SideName;
+  executionMode?: "LIVE" | "DRY_RUN";
   entryTime: string;
   settleTime: string;
   entryRefPrice: number;
+  entryPrice?: number;
+  entryNotionalUsd?: number;
   resolved?: boolean;
   win?: boolean;
   settleRefPrice?: number;
   orderId?: string;
+  matchedSize?: number;
+  orderStatus?: string;
+  officialPnlUsd?: number;
+  settlementSource?: "BINANCE_PROXY" | "POLYMARKET_OFFICIAL";
 }
 
 export interface BotState {
