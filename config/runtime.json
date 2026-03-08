@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "dryRun": false,
+    "dryRun": true,
     "pollIntervalSec": 20,
     "autoClaim": true,
     "claimCooldownSec": 300
@@ -12,7 +12,105 @@
     "baseBetUsd": 1.5,
     "maxBetUsd": 2.6,
     "minOrderShares": 5,
-    "priceAggression": 0.01
+    "priceAggression": 0.01,
+    "targets": [
+      {
+        "id": "BTC_5m",
+        "enabled": true,
+        "coin": "BTC",
+        "horizonMin": 5,
+        "symbol": "BTCUSDT",
+        "modelPath": "state/models/btc_5m_logreg.json"
+      },
+      {
+        "id": "ETH_5m",
+        "enabled": true,
+        "coin": "ETH",
+        "horizonMin": 5,
+        "symbol": "ETHUSDT",
+        "modelPath": "state/models/eth_5m_logreg.json"
+      },
+      {
+        "id": "SOL_5m",
+        "enabled": false,
+        "coin": "SOL",
+        "horizonMin": 5,
+        "symbol": "SOLUSDT",
+        "modelPath": "state/models/sol_5m_logreg.json"
+      },
+      {
+        "id": "XRP_5m",
+        "enabled": false,
+        "coin": "XRP",
+        "horizonMin": 5,
+        "symbol": "XRPUSDT",
+        "modelPath": "state/models/xrp_5m_logreg.json"
+      },
+      {
+        "id": "BTC_15m",
+        "enabled": false,
+        "coin": "BTC",
+        "horizonMin": 15,
+        "symbol": "BTCUSDT",
+        "modelPath": "state/models/btc_15m_logreg.json"
+      },
+      {
+        "id": "ETH_15m",
+        "enabled": false,
+        "coin": "ETH",
+        "horizonMin": 15,
+        "symbol": "ETHUSDT",
+        "modelPath": "state/models/eth_15m_logreg.json"
+      },
+      {
+        "id": "SOL_15m",
+        "enabled": false,
+        "coin": "SOL",
+        "horizonMin": 15,
+        "symbol": "SOLUSDT",
+        "modelPath": "state/models/sol_15m_logreg.json"
+      },
+      {
+        "id": "XRP_15m",
+        "enabled": false,
+        "coin": "XRP",
+        "horizonMin": 15,
+        "symbol": "XRPUSDT",
+        "modelPath": "state/models/xrp_15m_logreg.json"
+      },
+      {
+        "id": "BTC_1h",
+        "enabled": false,
+        "coin": "BTC",
+        "horizonMin": 60,
+        "symbol": "BTCUSDT",
+        "modelPath": "state/models/btc_1h_logreg.json"
+      },
+      {
+        "id": "ETH_1h",
+        "enabled": false,
+        "coin": "ETH",
+        "horizonMin": 60,
+        "symbol": "ETHUSDT",
+        "modelPath": "state/models/eth_1h_logreg.json"
+      },
+      {
+        "id": "SOL_1h",
+        "enabled": false,
+        "coin": "SOL",
+        "horizonMin": 60,
+        "symbol": "SOLUSDT",
+        "modelPath": "state/models/sol_1h_logreg.json"
+      },
+      {
+        "id": "XRP_1h",
+        "enabled": false,
+        "coin": "XRP",
+        "horizonMin": 60,
+        "symbol": "XRPUSDT",
+        "modelPath": "state/models/xrp_1h_logreg.json"
+      }
+    ]
   },
   "marketFilter": {
     "minMarketLiquidity": 300,

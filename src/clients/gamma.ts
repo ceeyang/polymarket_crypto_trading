@@ -1,6 +1,6 @@
 import axios from "axios";
 
-import type { Config } from "../config.js";
+import type { Config, MarketTarget, SupportedCoin, SupportedHorizon } from "../config.js";
 import type { GammaMarket, SelectedMarket } from "../types.js";
 import { has5mHint, hasClockHint, hasEthKeyword, minutesUntil, parseJsonArray, toNum } from "../utils.js";
 
@@ -8,7 +8,19 @@ export class GammaClient {
   constructor(private readonly config: Config) {}
 
   async getCandidateMarkets(limit = 500, now = new Date()): Promise<GammaMarket[]> {
-    const slugCandidates = this.buildEth5mSlugs(now);
+    const defaultTarget: MarketTarget = {
+      id: "ETH_5m",
+      enabled: true,
+      coin: "ETH",
+      horizonMin: 5,
+      symbol: "ETHUSDT",
+      modelPath: this.config.trainedModelPath,
+    };
+    return this.getCandidateMarketsForTarget(defaultTarget, limit, now);
+  }
+
+  async getCandidateMarketsForTarget(target: MarketTarget, limit = 500, now = new Date()): Promise<GammaMarket[]> {
+    const slugCandidates = this.buildTargetSlugs(target.coin, target.horizonMin, now);
     const directMarkets = await this.fetchMarketsBySlugs(slugCandidates);
     if (directMarkets.length > 0) {
       return directMarkets;
@@ -61,6 +73,23 @@ export class GammaClient {
     now = new Date(),
     excludedMarketIds?: Set<string>,
   ): SelectedMarket | null {
+    const defaultTarget: MarketTarget = {
+      id: "ETH_5m",
+      enabled: true,
+      coin: "ETH",
+      horizonMin: 5,
+      symbol: "ETHUSDT",
+      modelPath: this.config.trainedModelPath,
+    };
+    return this.selectBestMarketForTarget(markets, defaultTarget, now, excludedMarketIds);
+  }
+
+  selectBestMarketForTarget(
+    markets: GammaMarket[],
+    target: MarketTarget,
+    now = new Date(),
+    excludedMarketIds?: Set<string>,
+  ): SelectedMarket | null {
     const strictCandidates: SelectedMarket[] = [];
     const relaxedCandidates: SelectedMarket[] = [];
 
@@ -69,12 +98,12 @@ export class GammaClient {
       if (m.enableOrderBook === false) continue;
 
       const searchable = this.getSearchableText(m);
-      if (!searchable || !hasEthKeyword(searchable)) continue;
-      if (!has5mHint(searchable)) continue;
+      if (!searchable || !this.hasCoinKeyword(searchable, target.coin)) continue;
+      if (!this.hasHorizonHint(searchable, target.horizonMin)) continue;
 
       const endDate = this.getEndDate(m);
       if (!endDate) continue;
-      if (!this.isCurrentFiveMinuteWindow(m, endDate, now)) continue;
+      if (!this.isCurrentTimeWindow(m, endDate, target.horizonMin, now)) continue;
 
       const minsLeft = minutesUntil(endDate, now);
       if (minsLeft <= 0) continue;
@@ -112,6 +141,7 @@ export class GammaClient {
         minsLeft,
         liquidity,
         volume: toNum(m.volume, 0),
+        targetHorizonMin: target.horizonMin,
       });
 
       const candidate: SelectedMarket = {
@@ -138,7 +168,8 @@ export class GammaClient {
 
       if (isStrict) strictCandidates.push(candidate);
 
-      const isRelaxed = minsLeft <= 25;
+      const relaxedMax = Math.max(25, target.horizonMin * 3);
+      const isRelaxed = minsLeft <= relaxedMax;
       if (isRelaxed) relaxedCandidates.push(candidate);
     }
 
@@ -171,15 +202,16 @@ export class GammaClient {
     return fallbackIdx === 0 ? 0.5 : 0.5;
   }
 
-  private scoreMarket(input: { title: string; minsLeft: number; liquidity: number; volume: number }): number {
-    const { title, minsLeft, liquidity, volume } = input;
+  private scoreMarket(input: { title: string; minsLeft: number; liquidity: number; volume: number; targetHorizonMin: SupportedHorizon }): number {
+    const { title, minsLeft, liquidity, volume, targetHorizonMin } = input;
     let score = 0;
 
-    if (has5mHint(title)) score += 100;
+    if (this.hasHorizonHint(title, targetHorizonMin)) score += 100;
     if (hasClockHint(title)) score += 30;
 
-    // 越靠近 5 分钟目标到期越优先
-    score += Math.max(0, 40 - Math.abs(minsLeft - 5) * 8);
+    // 越靠近目标周期到期越优先
+    const distancePenalty = 8 * (5 / Math.max(5, targetHorizonMin));
+    score += Math.max(0, 40 - Math.abs(minsLeft - targetHorizonMin) * distancePenalty);
 
     // 流动性与成交量辅助打分
     score += Math.min(30, Math.log10(liquidity + 1) * 8);
@@ -243,16 +275,18 @@ export class GammaClient {
     return [];
   }
 
-  private buildEth5mSlugs(now = new Date()): string[] {
+  private buildTargetSlugs(coin: SupportedCoin, horizonMin: SupportedHorizon, now = new Date()): string[] {
     const nowSec = Math.floor(now.getTime() / 1000);
-    const anchor = Math.ceil(nowSec / 300) * 300;
-    const prefixes = ["eth", "ethereum"];
+    const intervalSec = horizonMin * 60;
+    const anchor = Math.ceil(nowSec / intervalSec) * intervalSec;
+    const prefixes = this.slugPrefixesForCoin(coin);
+    const horizonTag = horizonMin === 60 ? "1h" : `${horizonMin}m`;
     const slugs: string[] = [];
 
     for (let i = -2; i <= 6; i += 1) {
-      const ts = anchor + i * 300;
+      const ts = anchor + i * intervalSec;
       for (const p of prefixes) {
-        slugs.push(`${p}-updown-5m-${ts}`);
+        slugs.push(`${p}-updown-${horizonTag}-${ts}`);
       }
     }
 
@@ -308,12 +342,13 @@ export class GammaClient {
     return null;
   }
 
-  private isCurrentFiveMinuteWindow(m: GammaMarket, endDate: string, now: Date): boolean {
+  private isCurrentTimeWindow(m: GammaMarket, endDate: string, horizonMin: SupportedHorizon, now: Date): boolean {
     const endMs = Date.parse(endDate);
     if (!Number.isFinite(endMs)) return false;
 
     const nowMs = now.getTime();
     if (nowMs >= endMs) return false;
+    if (!this.isAlignedWithCurrentWindowEnd(endMs, horizonMin, nowMs)) return false;
 
     const startDate = this.getStartDate(m);
     if (startDate) {
@@ -323,8 +358,52 @@ export class GammaClient {
       }
     }
 
-    // Fallback when start time is absent: treat markets ending within ~6 minutes as current window.
-    const minsLeft = (endMs - nowMs) / 60000;
-    return minsLeft > 0 && minsLeft <= 6;
+    // Fallback when start time is absent: alignment check above plus basic not-expired check.
+    return true;
+  }
+
+  private isAlignedWithCurrentWindowEnd(endMs: number, horizonMin: SupportedHorizon, nowMs: number): boolean {
+    const intervalMs = horizonMin * 60_000;
+    const expectedEndMs = Math.floor(nowMs / intervalMs) * intervalMs + intervalMs;
+    const toleranceMs = 90_000;
+    return Math.abs(endMs - expectedEndMs) <= toleranceMs;
+  }
+
+  private slugPrefixesForCoin(coin: SupportedCoin): string[] {
+    switch (coin) {
+      case "BTC":
+        return ["btc", "bitcoin"];
+      case "ETH":
+        return ["eth", "ethereum"];
+      case "SOL":
+        return ["sol", "solana"];
+      case "XRP":
+        return ["xrp", "ripple"];
+    }
+  }
+
+  private hasCoinKeyword(text: string, coin: SupportedCoin): boolean {
+    const s = text.toLowerCase();
+    switch (coin) {
+      case "BTC":
+        return /\bbtc\b|\bbitcoin\b/.test(s);
+      case "ETH":
+        return hasEthKeyword(s);
+      case "SOL":
+        return /\bsol\b|\bsolana\b/.test(s);
+      case "XRP":
+        return /\bxrp\b|\bripple\b/.test(s);
+      default:
+        return false;
+    }
+  }
+
+  private hasHorizonHint(text: string, horizonMin: SupportedHorizon): boolean {
+    const s = text.toLowerCase();
+    if (horizonMin === 5) return has5mHint(s);
+    if (horizonMin === 15) {
+      return ["15m", "15 min", "15-min", "15 minute", "15 minutes", "15分钟"].some((h) => s.includes(h));
+    }
+    return ["1h", "1 hour", "60m", "60 min", "60-minute", "1小时"].some((h) => s.includes(h));
   }
 }

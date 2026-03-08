@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "web": "tsx src/web.ts",
     "balance": "tsx src/balance.ts",
     "claim": "tsx src/claim.ts",
     "train:model": "tsx src/train-model.ts",

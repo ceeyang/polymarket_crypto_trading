@@ -51,9 +51,23 @@ export class StateStore {
     this.save(state);
   }
 
-  canTradeByCooldown(cooldownSeconds: number): boolean {
+  canTradeByCooldown(cooldownSeconds: number, targetId?: string): boolean {
     if (cooldownSeconds <= 0) return true;
     const state = this.load();
+    const trades = state.trades ?? [];
+
+    if (targetId) {
+      let latestMs = NaN;
+      for (let i = trades.length - 1; i >= 0; i -= 1) {
+        const t = trades[i];
+        if (t.targetId !== targetId) continue;
+        latestMs = Date.parse(t.entryTime);
+        break;
+      }
+      if (!Number.isFinite(latestMs)) return true;
+      return Date.now() - latestMs >= cooldownSeconds * 1000;
+    }
+
     if (!state.lastTradeAt) return true;
     const elapsed = Date.now() - new Date(state.lastTradeAt).getTime();
     return elapsed >= cooldownSeconds * 1000;

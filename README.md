@@ -1,17 +1,18 @@
-# ETH 5分钟预测交易机器人 (TypeScript)
+# Polymarket 多盘口预测交易机器人 (TypeScript)
 
 这是一个从零开始的 TypeScript 自动交易项目：
-- 市场：Polymarket 上 ETH 短周期（二元 Yes/No）盘口
-- 目标：捕捉接近 5 分钟周期的 ETH 涨跌市场并自动下单
+- 市场：Polymarket 上加密货币短周期（二元 Yes/No）盘口
+- 支持：BTC / ETH / SOL / XRP，5m / 15m / 1h（最多 12 个盘口目标）
 - 数据：Binance 1m K线（训练型 Logistic Regression）
 - 执行：Polymarket CLOB `@polymarket/clob-client`
 - 收益领取：官方 relayer `@polymarket/builder-relayer-client`
 
 ## 功能
 
-- 自动发现 ETH 分钟级市场（优先 5 分钟特征 + 临近到期）
+- 自动发现多币种多周期盘口（当前窗口优先）
 - 计算未来短周期上涨概率（强制使用训练模型）
 - 对比市场隐含概率，判断是否有 edge
+- 目标化配置：每个目标可独立启用/停用（默认开启 BTC_5m、ETH_5m）
 - 风控：
   - 最小 edge 阈值
   - 单笔下注金额上下限
@@ -29,6 +30,11 @@ cp .env.example .env
 # 编辑 config/runtime.json（交易与训练参数）
 pnpm run train:model
 npm run dev
+```
+
+Web 配置与日志面板：
+```bash
+pnpm run web
 ```
 
 查询余额：
@@ -55,6 +61,13 @@ npm start
 pnpm run train:model
 ```
 
+按 target 训练（示例）：
+```bash
+pnpm run train:model -- --target BTC_5m
+pnpm run train:model -- --target ETH_15m
+pnpm run train:model -- --all-targets
+```
+
 训练完成后会输出模型文件（默认）：
 - `state/models/eth_5m_logreg.json`
 
@@ -68,6 +81,7 @@ pnpm run train:model
 - `pnpm run claim`：通过官方 relayer 执行 `redeemPositions`（支持 Proxy/Safe 路径）
 - 仅领取指定 conditionId：`pnpm run claim -- <conditionId1> <conditionId2>`
 - 机器人循环内可自动领取：`runtime.autoClaim=true`，并通过 `runtime.claimCooldownSec` 控制间隔
+- 运行日志会写入：`state/runtime.log`（Web 面板可查看）
 
 ## 轮次统计
 
@@ -87,6 +101,11 @@ pnpm run train:model
 - `runtime.autoClaim / runtime.claimCooldownSec`
 - `prediction.trainedModelPath`
 - `prediction.minEdge / baseBetUsd / maxBetUsd / minOrderShares`
+- `prediction.targets`（最多 12 个）
+  - 每项支持：`enabled / coin / horizonMin / symbol / modelPath`
+  - 每项可选训练覆盖：`trainStart / trainEnd / trainLookbackMin / trainStepMin / trainValDays / trainEpochs / trainLearningRate / trainL2 / trainPatience`
+  - 建议每个 target 使用独立 `modelPath`，避免模型错配
+- 训练脚本会按周期自动使用不同默认超参（5m/15m/1h），并允许 target 级覆盖
 - `network.signatureType / chainId / rpcUrl / usdcAddress / ctfAddress`
   - 可选：`network.rpcUrls`（数组），`claim` 会自动探测并切换到可用节点
   - `network.relayerHost`

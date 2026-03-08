@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Polymarket Bot Dashboard</title>
+    <style>
+      :root {
+        --bg: #f5f7fb;
+        --card: #ffffff;
+        --text: #121826;
+        --muted: #60708a;
+        --primary: #0f62fe;
+        --border: #dbe3ef;
+      }
+      body {
+        margin: 0;
+        background: linear-gradient(120deg, #eef3ff 0%, #f8fafc 60%, #eef8f0 100%);
+        color: var(--text);
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      }
+      .wrap {
+        max-width: 1200px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 22px;
+      }
+      h2 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 560px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+      pre {
+        height: 560px;
+        overflow: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        margin: 0;
+        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 12px;
+        background: #f8fbff;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+        flex-wrap: wrap;
+      }
+      button {
+        border: 0;
+        border-radius: 8px;
+        background: var(--primary);
+        color: white;
+        padding: 8px 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      input {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 7px 8px;
+        width: 80px;
+      }
+      @media (max-width: 1024px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Polymarket 多盘口机器人控制台</h1>
+      <div class="muted">更新配置后会写入 <code>config/runtime.json</code>。建议重启 bot 生效。</div>
+      <div class="grid">
+        <section class="card">
+          <h2>配置编辑器</h2>
+          <div class="row">
+            <button id="loadConfigBtn">刷新配置</button>
+            <button id="saveConfigBtn">保存配置</button>
+            <span id="cfgStatus" class="muted"></span>
+          </div>
+          <textarea id="configArea"></textarea>
+        </section>
+        <section class="card">
+          <h2>运行日志</h2>
+          <div class="row">
+            <button id="refreshLogBtn">刷新日志</button>
+            <label class="muted" for="tailInput">tail</label>
+            <input id="tailInput" type="number" value="200" min="50" max="2000" />
+            <span id="logStatus" class="muted"></span>
+          </div>
+          <pre id="logArea"></pre>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const cfgArea = document.getElementById("configArea");
+      const logArea = document.getElementById("logArea");
+      const cfgStatus = document.getElementById("cfgStatus");
+      const logStatus = document.getElementById("logStatus");
+      const tailInput = document.getElementById("tailInput");
+
+      async function loadConfig() {
+        cfgStatus.textContent = "加载中...";
+        try {
+          const resp = await fetch("/api/config");
+          const data = await resp.json();
+          cfgArea.value = JSON.stringify(data, null, 2);
+          cfgStatus.textContent = "配置已加载";
+        } catch (err) {
+          cfgStatus.textContent = `加载失败: ${String(err)}`;
+        }
+      }
+
+      async function saveConfig() {
+        cfgStatus.textContent = "保存中...";
+        try {
+          const parsed = JSON.parse(cfgArea.value);
+          const resp = await fetch("/api/config", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(parsed),
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            throw new Error(data?.error || `HTTP ${resp.status}`);
+          }
+          cfgStatus.textContent = "保存成功";
+        } catch (err) {
+          cfgStatus.textContent = `保存失败: ${String(err)}`;
+        }
+      }
+
+      async function loadLogs() {
+        try {
+          const tail = Number(tailInput.value || "200");
+          const resp = await fetch(`/api/logs?tail=${encodeURIComponent(tail)}`);
+          const data = await resp.json();
+          logArea.textContent = Array.isArray(data.lines) ? data.lines.join("\n") : "";
+          logArea.scrollTop = logArea.scrollHeight;
+          logStatus.textContent = `更新于 ${new Date().toLocaleTimeString()}`;
+        } catch (err) {
+          logStatus.textContent = `读取失败: ${String(err)}`;
+        }
+      }
+
+      document.getElementById("loadConfigBtn").addEventListener("click", loadConfig);
+      document.getElementById("saveConfigBtn").addEventListener("click", saveConfig);
+      document.getElementById("refreshLogBtn").addEventListener("click", loadLogs);
+
+      loadConfig();
+      loadLogs();
+      setInterval(loadLogs, 2000);
+    </script>
+  </body>
+</html>

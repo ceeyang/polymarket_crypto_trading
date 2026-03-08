@@ -65,6 +65,10 @@ export interface TradeDecision {
 
 export interface LiveTradeRecord {
   marketId: string;
+  targetId?: string;
+  coin?: string;
+  horizonMin?: number;
+  symbol?: string;
   side: SideName;
   entryTime: string;
   settleTime: string;
