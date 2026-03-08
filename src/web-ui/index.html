@@ -135,6 +135,22 @@
         max-width: 100%;
         overflow-x: auto;
       }
+      .targets-compact {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(150px, 1fr));
+        gap: 8px 12px;
+        margin-top: 8px;
+      }
+      .target-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 7px 9px;
+        background: #fbfdff;
+        font-size: 13px;
+      }
       .log-wrap {
         width: 100%;
         max-width: 100%;
@@ -149,14 +165,72 @@
         border: 1px solid #dbe4f5;
         background: #f6f9ff;
       }
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(120px, 1fr));
+        gap: 10px;
+        margin: 10px 0 12px;
+      }
+      .stat {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 8px;
+        background: #fbfdff;
+      }
+      .stat .label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .stat .value {
+        margin-top: 3px;
+        font-weight: 700;
+        font-size: 18px;
+      }
+      .badge {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .badge.win {
+        color: #065f46;
+        background: #d1fae5;
+      }
+      .badge.lose {
+        color: #991b1b;
+        background: #fee2e2;
+      }
+      .badge.pending {
+        color: #92400e;
+        background: #fef3c7;
+      }
+      .select {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 6px 8px;
+        background: #fff;
+      }
       @media (max-width: 1050px) {
         .form-grid {
           grid-template-columns: 1fr 1fr;
+        }
+        .targets-compact {
+          grid-template-columns: repeat(3, minmax(150px, 1fr));
+        }
+        .stats-grid {
+          grid-template-columns: repeat(3, minmax(120px, 1fr));
         }
       }
       @media (max-width: 640px) {
         .form-grid {
           grid-template-columns: 1fr;
+        }
+        .targets-compact {
+          grid-template-columns: repeat(2, minmax(140px, 1fr));
+        }
+        .stats-grid {
+          grid-template-columns: repeat(2, minmax(120px, 1fr));
         }
       }
     </style>
@@ -165,6 +239,10 @@
     <div class="wrap">
       <h1>Polymarket 多盘口机器人控制台</h1>
       <div class="muted">保存后会写入 <code>config/runtime.json</code>，并通知 bot 在下一轮自动热重载。</div>
+      <div class="row" style="margin: 8px 0 0">
+        <button id="refreshBalanceBtn">刷新余额</button>
+        <span id="balanceInfo" class="muted">余额加载中...</span>
+      </div>
 
       <div class="grid">
         <section class="card">
@@ -208,28 +286,122 @@
               <label>自动领取间隔(秒)</label>
               <input id="claimCooldownSec" type="number" min="30" step="1" />
             </div>
+            <div class="field">
+              <label>最大回撤(%, 0=关闭)</label>
+              <input id="maxDrawdownPct" type="number" min="0" step="0.1" />
+            </div>
+            <div class="field">
+              <label>最大未结算笔数(0=关闭)</label>
+              <input id="maxOpenTrades" type="number" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label>当日最大交易数(0=关闭)</label>
+              <input id="maxTradesPerDay" type="number" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label>连续亏损熔断(0=关闭)</label>
+              <input id="maxConsecutiveLosses" type="number" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label>最小进场剩余秒数</label>
+              <input id="minEntrySeconds" type="number" min="5" step="1" />
+            </div>
+            <div class="field">
+              <label>最小进场价格</label>
+              <input id="minEntryPrice" type="number" min="0.01" max="0.99" step="0.01" />
+            </div>
+            <div class="field">
+              <label>最大进场价格</label>
+              <input id="maxEntryPrice" type="number" min="0.01" max="0.99" step="0.01" />
+            </div>
+            <div class="field">
+              <label>最小 Overround</label>
+              <input id="minOverround" type="number" min="0.5" max="1.5" step="0.01" />
+            </div>
+            <div class="field">
+              <label>最大 Overround</label>
+              <input id="maxOverround" type="number" min="0.5" max="1.5" step="0.01" />
+            </div>
+            <div class="field">
+              <label>反向单最小剩余秒数</label>
+              <input id="reverseMinEntrySeconds" type="number" min="5" step="1" />
+            </div>
+            <div class="field">
+              <label>反向单最小模型概率</label>
+              <input id="reverseMinModelProb" type="number" min="0" max="1" step="0.01" />
+            </div>
+            <div class="field">
+              <label>反向单最小 Edge 倍数</label>
+              <input id="reverseMinEdgeMultiplier" type="number" min="1" step="0.1" />
+            </div>
           </div>
 
           <div class="row" style="margin: 10px 0 14px">
             <label class="toggle"><input id="dryRun" type="checkbox" /> dryRun（不真实下单）</label>
             <label class="toggle"><input id="autoClaim" type="checkbox" /> 自动领取收益</label>
+            <label class="toggle"><input id="enableReverseFallback" type="checkbox" /> 启用反向单</label>
           </div>
 
           <h2>盘口启用开关 <span class="chip" id="enabledCount">0 / 0</span></h2>
           <div class="table-wrap">
+            <div id="targetsList" class="targets-compact"></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>交易表现</h2>
+          <div class="row" style="margin-bottom: 8px">
+            <button id="refreshTradesBtn">刷新交易</button>
+            <button id="clearTradesBtn">清空交易记录</button>
+            <label class="muted">每页</label>
+            <select id="tradePageSize" class="select">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+            </select>
+            <label class="muted">盘口</label>
+            <select id="tradeTarget" class="select">
+              <option value="">全部</option>
+            </select>
+            <label class="muted">状态</label>
+            <select id="tradeResolved" class="select">
+              <option value="">全部</option>
+              <option value="true">已结算</option>
+              <option value="false">待结算</option>
+            </select>
+            <span id="tradeStatus" class="muted"></span>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat"><div class="label">总交易</div><div class="value" id="sTotal">0</div></div>
+            <div class="stat"><div class="label">已结算</div><div class="value" id="sSettled">0</div></div>
+            <div class="stat"><div class="label">待结算</div><div class="value" id="sPending">0</div></div>
+            <div class="stat"><div class="label">胜场</div><div class="value" id="sWins">0</div></div>
+            <div class="stat"><div class="label">负场</div><div class="value" id="sLosses">0</div></div>
+            <div class="stat"><div class="label">胜率</div><div class="value" id="sWinRate">0%</div></div>
+          </div>
+
+          <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>启用</th>
-                  <th>ID</th>
-                  <th>币种</th>
-                  <th>周期</th>
-                  <th>交易对</th>
-                  <th>模型路径</th>
+                  <th>进场时间</th>
+                  <th>盘口</th>
+                  <th>方向</th>
+                  <th>结果</th>
+                  <th>进场价</th>
+                  <th>结算价</th>
+                  <th>marketId</th>
                 </tr>
               </thead>
-              <tbody id="targetsBody"></tbody>
+              <tbody id="tradesBody"></tbody>
             </table>
+          </div>
+
+          <div class="row" style="margin-top: 10px">
+            <button id="tradePrevBtn">上一页</button>
+            <button id="tradeNextBtn">下一页</button>
+            <span id="tradePageInfo" class="muted"></span>
           </div>
         </section>
 
@@ -251,13 +423,24 @@
 
     <script>
       let fullConfig = null;
+      const tradeQuery = { page: 1, pageSize: 20, targetId: "", resolved: "" };
 
       const cfgStatus = document.getElementById("cfgStatus");
       const logArea = document.getElementById("logArea");
       const logStatus = document.getElementById("logStatus");
       const tailInput = document.getElementById("tailInput");
-      const targetsBody = document.getElementById("targetsBody");
+      const targetsList = document.getElementById("targetsList");
       const enabledCount = document.getElementById("enabledCount");
+      const balanceInfo = document.getElementById("balanceInfo");
+
+      const tradeStatus = document.getElementById("tradeStatus");
+      const tradeTarget = document.getElementById("tradeTarget");
+      const tradeResolved = document.getElementById("tradeResolved");
+      const tradePageSize = document.getElementById("tradePageSize");
+      const tradesBody = document.getElementById("tradesBody");
+      const tradePrevBtn = document.getElementById("tradePrevBtn");
+      const tradeNextBtn = document.getElementById("tradeNextBtn");
+      const tradePageInfo = document.getElementById("tradePageInfo");
 
       const num = (id, fallback) => {
         const v = Number(document.getElementById(id).value);
@@ -269,28 +452,89 @@
         el.value = value == null ? "" : String(value);
       };
 
+      const fmtNumber = (v, d = 4) => {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return "-";
+        return n.toFixed(d);
+      };
+
+      const fmtTime = (iso) => {
+        if (!iso) return "-";
+        const t = new Date(iso);
+        if (Number.isNaN(t.getTime())) return String(iso);
+        return t.toLocaleString();
+      };
+
       function renderTargets(targets) {
-        targetsBody.innerHTML = "";
+        targetsList.innerHTML = "";
         let enabled = 0;
 
         for (let i = 0; i < targets.length; i += 1) {
           const t = targets[i];
           if (t.enabled) enabled += 1;
 
-          const tr = document.createElement("tr");
-          const horizonText = Number(t.horizonMin) === 60 ? "1h" : `${t.horizonMin}m`;
-          tr.innerHTML = `
-            <td><input type="checkbox" class="target-enabled" data-idx="${i}" ${t.enabled ? "checked" : ""} /></td>
-            <td>${t.id || ""}</td>
-            <td>${t.coin || ""}</td>
-            <td>${horizonText}</td>
-            <td>${t.symbol || ""}</td>
-            <td title="${t.modelPath || ""}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.modelPath || ""}</td>
+          const horizonText = Number(t.horizonMin) === 60 ? "1H" : `${t.horizonMin}M`;
+          const name = `${t.coin || "-"}-${horizonText}`;
+          const row = document.createElement("label");
+          row.className = "target-item";
+          row.innerHTML = `
+            <input type="checkbox" class="target-enabled" data-idx="${i}" ${t.enabled ? "checked" : ""} />
+            <span>${name}</span>
           `;
-          targetsBody.appendChild(tr);
+          targetsList.appendChild(row);
         }
 
         enabledCount.textContent = `${enabled} / ${targets.length}`;
+      }
+
+      function renderTradeTargets(targets) {
+        const prev = tradeTarget.value || "";
+        tradeTarget.innerHTML = '<option value="">全部</option>';
+        for (const t of targets || []) {
+          const opt = document.createElement("option");
+          opt.value = t.id || "";
+          opt.textContent = `${t.id} (${t.coin} ${Number(t.horizonMin) === 60 ? "1h" : `${t.horizonMin}m`})`;
+          tradeTarget.appendChild(opt);
+        }
+        tradeTarget.value = prev;
+      }
+
+      function renderTradeSummary(summary) {
+        document.getElementById("sTotal").textContent = String(summary?.totalTrades ?? 0);
+        document.getElementById("sSettled").textContent = String(summary?.settledTrades ?? 0);
+        document.getElementById("sPending").textContent = String(summary?.pendingTrades ?? 0);
+        document.getElementById("sWins").textContent = String(summary?.wins ?? 0);
+        document.getElementById("sLosses").textContent = String(summary?.losses ?? 0);
+        const winRate = Number(summary?.winRate ?? 0);
+        document.getElementById("sWinRate").textContent = `${(winRate * 100).toFixed(2)}%`;
+      }
+
+      function renderTrades(items) {
+        tradesBody.innerHTML = "";
+        if (!Array.isArray(items) || items.length === 0) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = '<td colspan="7" class="muted">暂无交易记录</td>';
+          tradesBody.appendChild(tr);
+          return;
+        }
+
+        for (const t of items) {
+          const tr = document.createElement("tr");
+          const targetLabel = t.targetId || `${t.coin || "-"}_${Number(t.horizonMin) === 60 ? "1h" : `${t.horizonMin || "-"}m`}`;
+          let badgeClass = "pending";
+          if (t.status === "WIN") badgeClass = "win";
+          if (t.status === "LOSE") badgeClass = "lose";
+          tr.innerHTML = `
+            <td>${fmtTime(t.entryTime)}</td>
+            <td>${targetLabel}</td>
+            <td>${t.side || "-"}</td>
+            <td><span class="badge ${badgeClass}">${t.status || "PENDING"}</span></td>
+            <td>${fmtNumber(t.entryRefPrice, 6)}</td>
+            <td>${t.settleRefPrice == null ? "-" : fmtNumber(t.settleRefPrice, 6)}</td>
+            <td title="${t.marketId || ""}" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.marketId || "-"}</td>
+          `;
+          tradesBody.appendChild(tr);
+        }
       }
 
       function fillForm(cfg) {
@@ -302,11 +546,27 @@
         setValue("priceAggression", cfg.prediction.priceAggression);
         setValue("cooldownSeconds", cfg.marketFilter.cooldownSeconds);
         setValue("claimCooldownSec", cfg.runtime.claimCooldownSec || 300);
+        setValue("maxDrawdownPct", cfg.runtime.maxDrawdownPct || 0);
+        setValue("maxOpenTrades", cfg.runtime.maxOpenTrades ?? 6);
+        setValue("maxTradesPerDay", cfg.runtime.maxTradesPerDay ?? 120);
+        setValue("maxConsecutiveLosses", cfg.runtime.maxConsecutiveLosses ?? 4);
 
         document.getElementById("dryRun").checked = Boolean(cfg.runtime.dryRun);
         document.getElementById("autoClaim").checked = Boolean(cfg.runtime.autoClaim);
+        document.getElementById("enableReverseFallback").checked = Boolean(cfg.prediction.enableReverseFallback);
 
-        renderTargets(Array.isArray(cfg.prediction.targets) ? cfg.prediction.targets : []);
+        setValue("minEntrySeconds", cfg.marketFilter.minEntrySeconds || 45);
+        setValue("minEntryPrice", cfg.prediction.minEntryPrice ?? 0.05);
+        setValue("maxEntryPrice", cfg.prediction.maxEntryPrice ?? 0.9);
+        setValue("minOverround", cfg.prediction.minOverround ?? 0.95);
+        setValue("maxOverround", cfg.prediction.maxOverround ?? 1.06);
+        setValue("reverseMinEntrySeconds", cfg.prediction.reverseMinEntrySeconds ?? 90);
+        setValue("reverseMinModelProb", cfg.prediction.reverseMinModelProb ?? 0.42);
+        setValue("reverseMinEdgeMultiplier", cfg.prediction.reverseMinEdgeMultiplier ?? 1.3);
+
+        const targets = Array.isArray(cfg.prediction.targets) ? cfg.prediction.targets : [];
+        renderTargets(targets);
+        renderTradeTargets(targets);
       }
 
       function readFormToConfig() {
@@ -316,14 +576,27 @@
         next.runtime.autoClaim = document.getElementById("autoClaim").checked;
         next.runtime.pollIntervalSec = Math.max(5, Math.round(num("pollIntervalSec", next.runtime.pollIntervalSec || 20)));
         next.runtime.claimCooldownSec = Math.max(30, Math.round(num("claimCooldownSec", next.runtime.claimCooldownSec || 300)));
+        next.runtime.maxDrawdownPct = Math.max(0, num("maxDrawdownPct", next.runtime.maxDrawdownPct || 0));
+        next.runtime.maxOpenTrades = Math.max(0, Math.round(num("maxOpenTrades", next.runtime.maxOpenTrades ?? 6)));
+        next.runtime.maxTradesPerDay = Math.max(0, Math.round(num("maxTradesPerDay", next.runtime.maxTradesPerDay ?? 120)));
+        next.runtime.maxConsecutiveLosses = Math.max(0, Math.round(num("maxConsecutiveLosses", next.runtime.maxConsecutiveLosses ?? 4)));
 
         next.prediction.minEdge = Math.max(0, num("minEdge", next.prediction.minEdge || 0.02));
         next.prediction.baseBetUsd = Math.max(0.1, num("baseBetUsd", next.prediction.baseBetUsd || 1.5));
         next.prediction.maxBetUsd = Math.max(next.prediction.baseBetUsd, num("maxBetUsd", next.prediction.maxBetUsd || 2.6));
         next.prediction.minOrderShares = Math.max(1, num("minOrderShares", next.prediction.minOrderShares || 5));
         next.prediction.priceAggression = Math.max(0, num("priceAggression", next.prediction.priceAggression || 0.01));
+        next.prediction.minEntryPrice = Math.max(0.01, Math.min(0.99, num("minEntryPrice", next.prediction.minEntryPrice ?? 0.05)));
+        next.prediction.maxEntryPrice = Math.max(next.prediction.minEntryPrice, Math.min(0.99, num("maxEntryPrice", next.prediction.maxEntryPrice ?? 0.9)));
+        next.prediction.minOverround = Math.max(0.5, Math.min(1.5, num("minOverround", next.prediction.minOverround ?? 0.95)));
+        next.prediction.maxOverround = Math.max(next.prediction.minOverround, Math.min(1.5, num("maxOverround", next.prediction.maxOverround ?? 1.06)));
+        next.prediction.enableReverseFallback = document.getElementById("enableReverseFallback").checked;
+        next.prediction.reverseMinEntrySeconds = Math.max(5, Math.round(num("reverseMinEntrySeconds", next.prediction.reverseMinEntrySeconds ?? 90)));
+        next.prediction.reverseMinModelProb = Math.max(0, Math.min(1, num("reverseMinModelProb", next.prediction.reverseMinModelProb ?? 0.42)));
+        next.prediction.reverseMinEdgeMultiplier = Math.max(1, num("reverseMinEdgeMultiplier", next.prediction.reverseMinEdgeMultiplier ?? 1.3));
 
         next.marketFilter.cooldownSeconds = Math.max(0, Math.round(num("cooldownSeconds", next.marketFilter.cooldownSeconds || 20)));
+        next.marketFilter.minEntrySeconds = Math.max(5, Math.round(num("minEntrySeconds", next.marketFilter.minEntrySeconds || 45)));
 
         const checks = document.querySelectorAll(".target-enabled");
         checks.forEach((el) => {
@@ -371,6 +644,62 @@
         }
       }
 
+      async function loadTrades() {
+        try {
+          tradeStatus.textContent = "加载中...";
+          const query = new URLSearchParams({
+            page: String(tradeQuery.page),
+            pageSize: String(tradeQuery.pageSize),
+          });
+          if (tradeQuery.targetId) query.set("targetId", tradeQuery.targetId);
+          if (tradeQuery.resolved) query.set("resolved", tradeQuery.resolved);
+
+          const resp = await fetch(`/api/trades?${query.toString()}`);
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+
+          renderTradeSummary(data.summary || {});
+          renderTrades(data.items || []);
+          tradePageInfo.textContent = `第 ${data.pagination.page} / ${data.pagination.totalPages} 页，共 ${data.pagination.total} 条`;
+          tradePrevBtn.disabled = !data.pagination.hasPrev;
+          tradeNextBtn.disabled = !data.pagination.hasNext;
+          tradeQuery.page = data.pagination.page;
+          tradeStatus.textContent = `更新于 ${new Date().toLocaleTimeString()}`;
+        } catch (err) {
+          tradeStatus.textContent = `读取失败: ${String(err)}`;
+        }
+      }
+
+      async function clearTrades() {
+        try {
+          tradeStatus.textContent = "清空中...";
+          const resp = await fetch("/api/trades/clear", { method: "POST" });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          tradeQuery.page = 1;
+          await loadTrades();
+          tradeStatus.textContent = `交易记录已清空 ${new Date().toLocaleTimeString()}`;
+        } catch (err) {
+          tradeStatus.textContent = `清空失败: ${String(err)}`;
+        }
+      }
+
+      async function loadAccount() {
+        try {
+          balanceInfo.textContent = "余额加载中...";
+          const resp = await fetch("/api/account");
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          const equity = Number(data?.totalEquityUsd ?? 0);
+          const collateral = Number(data?.collateralUsdc ?? 0);
+          const user = data?.user || "-";
+          const msg = `当前总资产≈$${equity.toFixed(2)} (可用USDC≈$${collateral.toFixed(2)}) | ${user}`;
+          balanceInfo.textContent = data?.collateralError ? `${msg} | ${data.collateralError}` : msg;
+        } catch (err) {
+          balanceInfo.textContent = `余额读取失败: ${String(err)}`;
+        }
+      }
+
       async function loadLogs() {
         try {
           const tail = Number(tailInput.value || "200");
@@ -396,14 +725,51 @@
         }
       }
 
-      document.getElementById("loadBtn").addEventListener("click", loadConfig);
+      document.getElementById("loadBtn").addEventListener("click", async () => {
+        await loadConfig();
+        tradeQuery.page = 1;
+        await loadTrades();
+      });
       document.getElementById("saveBtn").addEventListener("click", saveConfig);
       document.getElementById("refreshLogBtn").addEventListener("click", loadLogs);
       document.getElementById("clearLogBtn").addEventListener("click", clearLogs);
+      document.getElementById("refreshTradesBtn").addEventListener("click", loadTrades);
+      document.getElementById("clearTradesBtn").addEventListener("click", clearTrades);
+      document.getElementById("refreshBalanceBtn").addEventListener("click", loadAccount);
 
-      loadConfig();
-      loadLogs();
-      setInterval(loadLogs, 2000);
+      tradeTarget.addEventListener("change", async () => {
+        tradeQuery.targetId = tradeTarget.value || "";
+        tradeQuery.page = 1;
+        await loadTrades();
+      });
+      tradeResolved.addEventListener("change", async () => {
+        tradeQuery.resolved = tradeResolved.value || "";
+        tradeQuery.page = 1;
+        await loadTrades();
+      });
+      tradePageSize.addEventListener("change", async () => {
+        tradeQuery.pageSize = Number(tradePageSize.value || "20");
+        tradeQuery.page = 1;
+        await loadTrades();
+      });
+      tradePrevBtn.addEventListener("click", async () => {
+        tradeQuery.page = Math.max(1, tradeQuery.page - 1);
+        await loadTrades();
+      });
+      tradeNextBtn.addEventListener("click", async () => {
+        tradeQuery.page += 1;
+        await loadTrades();
+      });
+
+      (async () => {
+        await loadConfig();
+        await loadTrades();
+        await loadAccount();
+        await loadLogs();
+        setInterval(loadLogs, 2000);
+        setInterval(loadTrades, 5000);
+        setInterval(loadAccount, 10000);
+      })();
     </script>
   </body>
 </html>

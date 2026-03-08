@@ -16,8 +16,14 @@
 - 风控：
   - 最小 edge 阈值
   - 单笔下注金额上下限
+  - 进场价格区间过滤（避免 95%+ 末端追单）
+  - overround 过滤（过滤异常盘口）
   - 市场流动性过滤
   - 冷却时间
+  - 最大未结算仓位数
+  - 每日最大交易数
+  - 连续亏损熔断
+  - 最大回撤自动停机（`runtime.maxDrawdownPct`）
   - 每个 market 只交易一次（本地状态持久化）
 - 默认按实盘模式运行（`DRY_RUN=false`）
 
@@ -91,6 +97,7 @@ pnpm run train:model -- --all-targets
 - 仅领取指定 conditionId：`pnpm run claim -- <conditionId1> <conditionId2>`
 - 机器人循环内可自动领取：`runtime.autoClaim=true`，并通过 `runtime.claimCooldownSec` 控制间隔
 - 运行日志会写入：`state/runtime.log`（Web 面板可查看）
+- Web 面板支持：清空日志、清空交易记录、交易分页与胜率统计、余额查看
 
 ## 轮次统计
 
@@ -108,13 +115,19 @@ pnpm run train:model -- --all-targets
 关键参数示例（`config/runtime.json`）：
 - `runtime.dryRun`
 - `runtime.autoClaim / runtime.claimCooldownSec`
+- `runtime.maxDrawdownPct`（百分比，`0` 表示关闭）
+- `runtime.maxOpenTrades / maxTradesPerDay / maxConsecutiveLosses`
 - `prediction.trainedModelPath`
 - `prediction.minEdge / baseBetUsd / maxBetUsd / minOrderShares`
+- `prediction.minEntryPrice / maxEntryPrice / minOverround / maxOverround`
+- `prediction.enableReverseFallback`（默认 `false`）
+- `prediction.reverseMinEntrySeconds / reverseMinModelProb / reverseMinEdgeMultiplier`
 - `prediction.targets`（最多 12 个）
   - 每项支持：`enabled / coin / horizonMin / symbol / modelPath`
   - 每项可选训练覆盖：`trainStart / trainEnd / trainLookbackMin / trainStepMin / trainValDays / trainEpochs / trainLearningRate / trainL2 / trainPatience`
   - 建议每个 target 使用独立 `modelPath`，避免模型错配
 - 训练脚本会按周期自动使用不同默认超参（5m/15m/1h），并允许 target 级覆盖
+- `marketFilter.minEntrySeconds`（下单最小剩余秒数）
 - `network.signatureType / chainId / rpcUrl / usdcAddress / ctfAddress`
   - 可选：`network.rpcUrls`（数组），`claim` 会自动探测并切换到可用节点
   - `network.relayerHost`

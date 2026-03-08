@@ -1,18 +1,30 @@
 {
   "runtime": {
-    "dryRun": true,
+    "dryRun": false,
     "pollIntervalSec": 20,
     "autoClaim": true,
-    "claimCooldownSec": 300
+    "claimCooldownSec": 300,
+    "maxDrawdownPct": 40,
+    "maxOpenTrades": 6,
+    "maxTradesPerDay": 120,
+    "maxConsecutiveLosses": 4
   },
   "prediction": {
     "lookbackMinutes": 120,
     "trainedModelPath": "state/models/eth_5m_logreg.json",
-    "minEdge": 0.02,
+    "minEdge": 0.025,
     "baseBetUsd": 1.5,
     "maxBetUsd": 2.5,
     "minOrderShares": 5,
     "priceAggression": 0.01,
+    "minEntryPrice": 0.05,
+    "maxEntryPrice": 0.9,
+    "minOverround": 0.95,
+    "maxOverround": 1.06,
+    "enableReverseFallback": false,
+    "reverseMinEntrySeconds": 90,
+    "reverseMinModelProb": 0.42,
+    "reverseMinEdgeMultiplier": 1.3,
     "targets": [
       {
         "id": "BTC_5m",
@@ -116,7 +128,8 @@
     "minMarketLiquidity": 300,
     "minTimeToExpiryMin": 1,
     "maxTimeToExpiryMin": 30,
-    "cooldownSeconds": 20
+    "cooldownSeconds": 20,
+    "minEntrySeconds": 45
   },
   "network": {
     "polyHost": "https://clob.polymarket.com",

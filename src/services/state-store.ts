@@ -51,6 +51,16 @@ export class StateStore {
     this.save(state);
   }
 
+  clearTrades(resetTradedMarkets = true): void {
+    const state = this.load();
+    state.trades = [];
+    state.lastTradeAt = undefined;
+    if (resetTradedMarkets) {
+      state.tradedMarkets = {};
+    }
+    this.save(state);
+  }
+
   canTradeByCooldown(cooldownSeconds: number, targetId?: string): boolean {
     if (cooldownSeconds <= 0) return true;
     const state = this.load();
@@ -129,6 +139,34 @@ export class StateStore {
       return t >= startMs;
     });
     return this.summarize(trades);
+  }
+
+  getTradeCountSince(startTime: string): number {
+    const startMs = Date.parse(startTime);
+    if (!Number.isFinite(startMs)) return 0;
+    const state = this.load();
+    return (state.trades ?? []).filter((x) => {
+      const t = Date.parse(x.entryTime);
+      return Number.isFinite(t) && t >= startMs;
+    }).length;
+  }
+
+  getOpenTradeCount(): number {
+    const state = this.load();
+    return (state.trades ?? []).filter((x) => !x.resolved).length;
+  }
+
+  getConsecutiveLosses(): number {
+    const state = this.load();
+    const trades = state.trades ?? [];
+    let losses = 0;
+    for (let i = trades.length - 1; i >= 0; i -= 1) {
+      const t = trades[i];
+      if (!t.resolved) continue;
+      if (t.win) break;
+      losses += 1;
+    }
+    return losses;
   }
 
   private summarize(trades: LiveTradeRecord[]): {

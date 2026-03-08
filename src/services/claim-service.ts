@@ -26,6 +26,8 @@ const CTF_REDEEM_ABI = [
 export interface ClaimRunOptions {
   conditionIds?: string[];
   logPrefix?: string;
+  quietNoop?: boolean;
+  maxConcurrency?: number;
 }
 
 export interface ClaimRunSummary {
@@ -228,6 +230,8 @@ async function executeRedeem(
 
 export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOptions): Promise<ClaimRunSummary> {
   const logPrefix = options?.logPrefix ?? "[claim]";
+  const quietNoop = Boolean(options?.quietNoop);
+  const maxConcurrency = Math.max(1, Math.floor(Number(options?.maxConcurrency ?? 1)));
   if (!cfg.privateKey) {
     throw new Error("PRIVATE_KEY missing in .env");
   }
@@ -257,7 +261,9 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   ));
 
   if (conditionIds.length === 0) {
-    log(logPrefix, "no redeemable condition ids found", { user, redeemablePositions: redeemable.length });
+    if (!quietNoop) {
+      log(logPrefix, "no redeemable condition ids found", { user, redeemablePositions: redeemable.length });
+    }
     return {
       user,
       redeemablePositions: redeemable.length,
@@ -302,18 +308,29 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   let success = 0;
   let failed = 0;
-  for (const conditionId of conditionIds) {
-    try {
-      const tx = createCtfRedeemTransaction(cfg, conditionId as Hex);
-      await executeRedeem(client, txType, tx, conditionId, logPrefix);
-      success += 1;
-    } catch (err) {
-      failed += 1;
-      log(logPrefix, "failed", {
-        conditionId,
-        error: getErrorMessage(err),
-      });
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const conditionId = conditionIds.shift();
+      if (!conditionId) return;
+      try {
+        const tx = createCtfRedeemTransaction(cfg, conditionId as Hex);
+        await executeRedeem(client, txType, tx, conditionId, logPrefix);
+        success += 1;
+      } catch (err) {
+        failed += 1;
+        log(logPrefix, "failed", {
+          conditionId,
+          error: getErrorMessage(err),
+        });
+      }
     }
+  };
+
+  if (maxConcurrency <= 1 || conditionIds.length <= 1) {
+    await worker();
+  } else {
+    const workers = Math.min(maxConcurrency, conditionIds.length);
+    await Promise.all(Array.from({ length: workers }, async () => worker()));
   }
 
   const summary: ClaimRunSummary = {

@@ -72,6 +72,18 @@ function resolveModelPath(cfg: Config, target: MarketTarget): string {
   return target.modelPath?.trim() ? target.modelPath : cfg.trainedModelPath;
 }
 
+function rawUsdcToNumber(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  return n / 1_000_000;
+}
+
+function startOfLocalDayIso(now = new Date()): string {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
 interface PreparedOrder {
   target: MarketTarget;
   label: string;
@@ -197,6 +209,10 @@ export async function startBot(): Promise<void> {
   const sessionStartedAt = new Date().toISOString();
   let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
+  let autoClaimInFlight = false;
+  let lastBalanceCheckAtMs = 0;
+  let balanceCheckInFlight = false;
+  let peakCollateralUsdc: number | null = null;
 
   const reloadRuntime = async (reason: string): Promise<RuntimeContext> => {
     const cfgKey = readConfigKey();
@@ -249,6 +265,7 @@ export async function startBot(): Promise<void> {
     sessionWins: initialPerfSession.wins,
     sessionWinRate: Number((initialPerfSession.winRate * 100).toFixed(2)),
   });
+  let lastRiskGateKey = "";
 
   runtime = await reloadRuntime("startup");
 
@@ -263,17 +280,65 @@ export async function startBot(): Promise<void> {
         return binance.getCloseNearTime(t.symbol || "ETHUSDT", settleMs);
       });
 
-      if (cfg.autoClaim && !cfg.dryRun) {
+      if (cfg.autoClaim && !cfg.dryRun && !autoClaimInFlight) {
         const nowMs = Date.now();
         if (nowMs - lastAutoClaimAtMs >= cfg.claimCooldownSec * 1000) {
-          try {
-            const claimSummary = await claimRedeemablePositions(cfg, { logPrefix: "[auto-claim]" });
-            log("auto claim result", claimSummary);
-          } catch (err) {
-            log("auto claim error", err instanceof Error ? err.message : err);
-          } finally {
-            lastAutoClaimAtMs = nowMs;
-          }
+          autoClaimInFlight = true;
+          lastAutoClaimAtMs = nowMs;
+          const cfgForClaim = cfg;
+          void claimRedeemablePositions(cfgForClaim, {
+            logPrefix: "[auto-claim]",
+            quietNoop: true,
+            maxConcurrency: 3,
+          })
+            .then((claimSummary) => {
+              if (claimSummary.reason !== "no redeemable condition ids") {
+                log("auto claim result", claimSummary);
+              }
+            })
+            .catch((err) => {
+              log("auto claim error", err instanceof Error ? err.message : err);
+            })
+            .finally(() => {
+              autoClaimInFlight = false;
+            });
+        }
+      }
+
+      if (cfg.maxDrawdownPct > 0 && !cfg.dryRun && !balanceCheckInFlight) {
+        const nowMs = Date.now();
+        if (nowMs - lastBalanceCheckAtMs >= 30_000) {
+          balanceCheckInFlight = true;
+          lastBalanceCheckAtMs = nowMs;
+          const traderForBalance = trader;
+          const drawdownLimit = cfg.maxDrawdownPct;
+          void traderForBalance.getBalanceAllowance({ assetType: "COLLATERAL" })
+            .then((balancePayload) => {
+              const currentCollateralUsdc = rawUsdcToNumber(balancePayload?.balance ?? 0);
+              if (!Number.isFinite(currentCollateralUsdc) || currentCollateralUsdc <= 0) return;
+
+              if (peakCollateralUsdc == null || currentCollateralUsdc > peakCollateralUsdc) {
+                peakCollateralUsdc = currentCollateralUsdc;
+              }
+              const peak = peakCollateralUsdc ?? currentCollateralUsdc;
+              const drawdownPct = peak > 0 ? ((peak - currentCollateralUsdc) / peak) * 100 : 0;
+
+              if (drawdownPct >= drawdownLimit) {
+                log("risk stop triggered: max drawdown reached", {
+                  drawdownPct: Number(drawdownPct.toFixed(3)),
+                  maxDrawdownPct: drawdownLimit,
+                  peakCollateralUsdc: Number(peak.toFixed(4)),
+                  currentCollateralUsdc: Number(currentCollateralUsdc.toFixed(4)),
+                });
+                setTimeout(() => process.exit(22), 0);
+              }
+            })
+            .catch((err) => {
+              log("balance check error", err instanceof Error ? err.message : err);
+            })
+            .finally(() => {
+              balanceCheckInFlight = false;
+            });
         }
       }
 
@@ -293,6 +358,47 @@ export async function startBot(): Promise<void> {
       if (summaryKey !== lastSummaryKey) {
         log("round summary", summaryPayload);
         lastSummaryKey = summaryKey;
+      }
+
+      const openTrades = state.getOpenTradeCount();
+      const tradesToday = state.getTradeCountSince(startOfLocalDayIso());
+      const consecutiveLosses = state.getConsecutiveLosses();
+
+      if (cfg.maxConsecutiveLosses > 0 && consecutiveLosses >= cfg.maxConsecutiveLosses) {
+        log("risk stop triggered: max consecutive losses reached", {
+          consecutiveLosses,
+          maxConsecutiveLosses: cfg.maxConsecutiveLosses,
+        });
+        process.exit(24);
+      }
+
+      if (cfg.maxOpenTrades > 0 && openTrades >= cfg.maxOpenTrades) {
+        const gateKey = `maxOpenTrades:${openTrades}`;
+        if (gateKey !== lastRiskGateKey) {
+          log("risk gate active: too many open trades", {
+            openTrades,
+            maxOpenTrades: cfg.maxOpenTrades,
+          });
+          lastRiskGateKey = gateKey;
+        }
+        continue;
+      }
+
+      if (cfg.maxTradesPerDay > 0 && tradesToday >= cfg.maxTradesPerDay) {
+        const gateKey = `maxTradesPerDay:${tradesToday}`;
+        if (gateKey !== lastRiskGateKey) {
+          log("risk gate active: daily trade cap reached", {
+            tradesToday,
+            maxTradesPerDay: cfg.maxTradesPerDay,
+          });
+          lastRiskGateKey = gateKey;
+        }
+        continue;
+      }
+
+      if (lastRiskGateKey) {
+        log("risk gate cleared", { key: lastRiskGateKey });
+        lastRiskGateKey = "";
       }
 
       const tradedMarketIds = state.getTradedMarketIds();

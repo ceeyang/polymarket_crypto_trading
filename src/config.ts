@@ -55,6 +55,10 @@ export interface RuntimeConfigFile {
     pollIntervalSec: number;
     autoClaim?: boolean;
     claimCooldownSec?: number;
+    maxDrawdownPct?: number;
+    maxOpenTrades?: number;
+    maxTradesPerDay?: number;
+    maxConsecutiveLosses?: number;
   };
   prediction: {
     lookbackMinutes: number;
@@ -64,6 +68,14 @@ export interface RuntimeConfigFile {
     maxBetUsd: number;
     minOrderShares?: number;
     priceAggression: number;
+    minEntryPrice?: number;
+    maxEntryPrice?: number;
+    minOverround?: number;
+    maxOverround?: number;
+    enableReverseFallback?: boolean;
+    reverseMinEntrySeconds?: number;
+    reverseMinModelProb?: number;
+    reverseMinEdgeMultiplier?: number;
     targets?: Partial<MarketTarget>[];
   };
   marketFilter: {
@@ -71,6 +83,7 @@ export interface RuntimeConfigFile {
     minTimeToExpiryMin: number;
     maxTimeToExpiryMin: number;
     cooldownSeconds: number;
+    minEntrySeconds?: number;
   };
   network: {
     polyHost: string;
@@ -93,6 +106,10 @@ export interface Config {
   pollIntervalSec: number;
   autoClaim: boolean;
   claimCooldownSec: number;
+  maxDrawdownPct: number;
+  maxOpenTrades: number;
+  maxTradesPerDay: number;
+  maxConsecutiveLosses: number;
   lookbackMinutes: number;
   trainedModelPath: string;
   minEdge: number;
@@ -100,10 +117,19 @@ export interface Config {
   maxBetUsd: number;
   minOrderShares: number;
   priceAggression: number;
+  minEntryPrice: number;
+  maxEntryPrice: number;
+  minOverround: number;
+  maxOverround: number;
+  enableReverseFallback: boolean;
+  reverseMinEntrySeconds: number;
+  reverseMinModelProb: number;
+  reverseMinEdgeMultiplier: number;
   minMarketLiquidity: number;
   minTimeToExpiryMin: number;
   maxTimeToExpiryMin: number;
   cooldownSeconds: number;
+  minEntrySeconds: number;
   polyHost: string;
   gammaHost: string;
   dataApiHost: string;
@@ -148,6 +174,12 @@ function parseSignatureType(raw: string | undefined, fallback: number): number {
 function parsePositiveInt(raw: unknown, fallback: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+function parseNonNegativeInt(raw: unknown, fallback: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return fallback;
   return Math.floor(n);
 }
 
@@ -270,7 +302,21 @@ export function loadConfig(): Config {
     ?? (signatureType === 2 ? "SAFE" : "PROXY");
   const autoClaim = rc.runtime.autoClaim ?? true;
   const claimCooldownSec = parsePositiveInt(rc.runtime.claimCooldownSec, 300);
+  const maxDrawdownPct = parseNonNegativeNumber(rc.runtime.maxDrawdownPct, 0);
+  const maxOpenTrades = parseNonNegativeInt(rc.runtime.maxOpenTrades, 6);
+  const maxTradesPerDay = parseNonNegativeInt(rc.runtime.maxTradesPerDay, 120);
+  const maxConsecutiveLosses = parseNonNegativeInt(rc.runtime.maxConsecutiveLosses, 4);
   const minOrderShares = parsePositiveNumber(rc.prediction.minOrderShares, 5);
+  const minEntryPrice = parsePositiveNumber(rc.prediction.minEntryPrice, 0.05);
+  const maxEntryPrice = parsePositiveNumber(rc.prediction.maxEntryPrice, 0.90);
+  const minOverround = parsePositiveNumber(rc.prediction.minOverround, 0.95);
+  const maxOverround = parsePositiveNumber(rc.prediction.maxOverround, 1.06);
+  const enableReverseFallback = Boolean(rc.prediction.enableReverseFallback ?? false);
+  const reverseMinEntrySeconds = parsePositiveInt(rc.prediction.reverseMinEntrySeconds, 90);
+  const reverseMinModelProbRaw = parseNonNegativeNumber(rc.prediction.reverseMinModelProb, 0.42);
+  const reverseMinEdgeMultiplier = parsePositiveNumber(rc.prediction.reverseMinEdgeMultiplier, 1.3);
+  const reverseMinModelProb = Math.max(0, Math.min(1, reverseMinModelProbRaw));
+  const minEntrySeconds = parsePositiveInt(rc.marketFilter.minEntrySeconds, 45);
   const targets = normalizeTargets(rc.prediction.targets, rc.prediction.trainedModelPath);
 
   return {
@@ -278,6 +324,10 @@ export function loadConfig(): Config {
     pollIntervalSec: rc.runtime.pollIntervalSec,
     autoClaim,
     claimCooldownSec,
+    maxDrawdownPct,
+    maxOpenTrades,
+    maxTradesPerDay,
+    maxConsecutiveLosses,
     lookbackMinutes: rc.prediction.lookbackMinutes,
     trainedModelPath: rc.prediction.trainedModelPath,
     minEdge: rc.prediction.minEdge,
@@ -285,10 +335,19 @@ export function loadConfig(): Config {
     maxBetUsd: rc.prediction.maxBetUsd,
     minOrderShares,
     priceAggression: rc.prediction.priceAggression,
+    minEntryPrice: Math.min(minEntryPrice, maxEntryPrice),
+    maxEntryPrice: Math.max(minEntryPrice, maxEntryPrice),
+    minOverround: Math.min(minOverround, maxOverround),
+    maxOverround: Math.max(minOverround, maxOverround),
+    enableReverseFallback,
+    reverseMinEntrySeconds,
+    reverseMinModelProb,
+    reverseMinEdgeMultiplier,
     minMarketLiquidity: rc.marketFilter.minMarketLiquidity,
     minTimeToExpiryMin: rc.marketFilter.minTimeToExpiryMin,
     maxTimeToExpiryMin: rc.marketFilter.maxTimeToExpiryMin,
     cooldownSeconds: rc.marketFilter.cooldownSeconds,
+    minEntrySeconds,
     polyHost: rc.network.polyHost,
     gammaHost: rc.network.gammaHost,
     dataApiHost: rc.network.dataApiHost,

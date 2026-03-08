@@ -35,6 +35,7 @@ export interface SelectedMarket {
   conditionId: string;
   title: string;
   endDate: string;
+  minsLeft: number;
   liquidity: number;
   yesTokenId: string;
   noTokenId: string;

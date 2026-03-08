@@ -149,6 +149,7 @@ export class GammaClient {
         conditionId: String(m.conditionId ?? m.id),
         title: String(m.question ?? m.title ?? m.slug ?? searchable),
         endDate,
+        minsLeft,
         liquidity,
         yesTokenId,
         noTokenId,
