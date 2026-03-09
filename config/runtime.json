@@ -5,7 +5,7 @@
     "autoClaim": true,
     "claimCooldownSec": 300,
     "maxDrawdownPct": 50,
-    "maxOpenTrades": 6,
+    "maxOpenTrades": 10,
     "maxTradesPerDay": 120,
     "maxConsecutiveLosses": 0
   },

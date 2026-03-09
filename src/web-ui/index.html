@@ -117,6 +117,57 @@
         color: #325271;
         gap: 8px;
       }
+      .scan-control {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin: 8px 0 12px;
+        padding: 12px 14px;
+        border: 1px solid #d4dde9;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.92);
+      }
+      .scan-info {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 260px;
+      }
+      .scan-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #b42318;
+        box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.12);
+      }
+      .scan-dot.on {
+        background: #067647;
+        box-shadow: 0 0 0 4px rgba(6, 118, 71, 0.14);
+      }
+      .scan-title {
+        font-weight: 700;
+      }
+      .scan-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #scanToggleBtn {
+        min-width: 152px;
+        font-size: 14px;
+      }
+      #scanToggleBtn.scan-on {
+        background: linear-gradient(90deg, #067647, #0f766e);
+      }
+      #scanToggleBtn.scan-off {
+        background: linear-gradient(90deg, #b42318, #b54708);
+      }
+      #scanRefreshBtn {
+        background: #ffffff;
+        border-color: #ccd8eb;
+        color: #355173;
+      }
       .row {
         display: flex;
         align-items: center;
@@ -368,6 +419,10 @@
         color: var(--warn);
         background: #ffefc6;
       }
+      .badge.canceled {
+        color: #475467;
+        background: #eaecf0;
+      }
       .badge.mode-live {
         color: #1d4ed8;
         background: #dbeafe;
@@ -438,6 +493,19 @@
         <button id="refreshBalanceBtn">刷新余额</button>
         <button id="claimBalanceBtn">赎回收益</button>
         <span id="balanceInfo" class="muted">余额加载中...</span>
+      </div>
+      <div class="scan-control">
+        <div class="scan-info">
+          <span id="scanStateDot" class="scan-dot"></span>
+          <div>
+            <div id="scanStateTitle" class="scan-title">扫描状态: 已暂停</div>
+            <div id="scanStateMeta" class="muted">Web 控制模式，需手动开始</div>
+          </div>
+        </div>
+        <div class="scan-actions">
+          <button id="scanToggleBtn" class="scan-off">开始扫描并运行预测</button>
+          <button id="scanRefreshBtn">刷新状态</button>
+        </div>
       </div>
 
       <div class="tabbar" role="tablist" aria-label="模块切换">
@@ -791,6 +859,19 @@
       const enabledCount = document.getElementById("enabledCount");
       const balanceInfo = document.getElementById("balanceInfo");
       const claimBalanceBtn = document.getElementById("claimBalanceBtn");
+      const scanStateDot = document.getElementById("scanStateDot");
+      const scanStateTitle = document.getElementById("scanStateTitle");
+      const scanStateMeta = document.getElementById("scanStateMeta");
+      const scanToggleBtn = document.getElementById("scanToggleBtn");
+      const scanRefreshBtn = document.getElementById("scanRefreshBtn");
+      let botControl = {
+        mode: "STANDALONE",
+        switchEnabled: false,
+        scanningEnabled: true,
+        effectiveScanning: true,
+        updatedAt: "",
+        updatedBy: "",
+      };
 
       const tradeStatus = document.getElementById("tradeStatus");
       const tradeTarget = document.getElementById("tradeTarget");
@@ -876,6 +957,81 @@
         if (Number.isNaN(t.getTime())) return String(iso);
         return t.toLocaleString();
       };
+
+      function renderBotControl() {
+        const enabled = Boolean(botControl?.effectiveScanning);
+        const webControlled = Boolean(botControl?.switchEnabled);
+        scanStateDot.classList.toggle("on", enabled);
+        scanStateTitle.textContent = enabled ? "扫描状态: 运行中" : "扫描状态: 已暂停";
+        const modeText = webControlled ? "Web 控制模式" : "纯 Bot 模式";
+        const updateText = botControl?.updatedAt ? `，更新: ${fmtTime(botControl.updatedAt)}` : "";
+        scanStateMeta.textContent = `${modeText}${updateText}`;
+
+        if (!webControlled) {
+          scanToggleBtn.disabled = true;
+          scanToggleBtn.textContent = "纯 Bot 模式（开关无效）";
+          scanToggleBtn.classList.remove("scan-on");
+          scanToggleBtn.classList.add("scan-off");
+          return;
+        }
+
+        scanToggleBtn.disabled = false;
+        scanToggleBtn.textContent = enabled ? "停止扫描与下单" : "开始扫描并运行预测";
+        scanToggleBtn.classList.toggle("scan-on", enabled);
+        scanToggleBtn.classList.toggle("scan-off", !enabled);
+      }
+
+      async function loadBotControl() {
+        try {
+          const resp = await fetch("/api/bot/control");
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          botControl = {
+            mode: String(data?.mode || "STANDALONE"),
+            switchEnabled: Boolean(data?.switchEnabled),
+            scanningEnabled: Boolean(data?.scanningEnabled),
+            effectiveScanning: Boolean(data?.effectiveScanning),
+            updatedAt: String(data?.updatedAt || ""),
+            updatedBy: String(data?.updatedBy || ""),
+          };
+          renderBotControl();
+        } catch (err) {
+          scanStateTitle.textContent = "扫描状态: 读取失败";
+          scanStateMeta.textContent = String(err);
+        }
+      }
+
+      async function toggleBotControl() {
+        if (!botControl.switchEnabled) {
+          return;
+        }
+        const nextEnabled = !Boolean(botControl.scanningEnabled);
+        scanToggleBtn.disabled = true;
+        try {
+          const resp = await fetch("/api/bot/control", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ scanningEnabled: nextEnabled }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          botControl = {
+            mode: String(data?.mode || "STANDALONE"),
+            switchEnabled: Boolean(data?.switchEnabled),
+            scanningEnabled: Boolean(data?.scanningEnabled),
+            effectiveScanning: Boolean(data?.effectiveScanning),
+            updatedAt: String(data?.updatedAt || ""),
+            updatedBy: String(data?.updatedBy || ""),
+          };
+          renderBotControl();
+        } catch (err) {
+          scanStateMeta.textContent = `切换失败: ${String(err)}`;
+        } finally {
+          if (botControl.switchEnabled) {
+            scanToggleBtn.disabled = false;
+          }
+        }
+      }
 
       function setActiveTab(tab) {
         activeTab = tab;
@@ -1318,6 +1474,7 @@
           let badgeClass = "pending";
           if (t.status === "WIN") badgeClass = "win";
           if (t.status === "LOSE") badgeClass = "lose";
+          if (t.status === "CANCELED") badgeClass = "canceled";
           const mode = t.executionMode === "DRY_RUN" ? "DRY_RUN" : "LIVE";
           const modeClass = mode === "DRY_RUN" ? "mode-dry" : "mode-live";
           const entryPrice = t.entryPrice == null ? null : Number(t.entryPrice);
@@ -1778,6 +1935,8 @@
       document.getElementById("clearTradesBtn").addEventListener("click", clearTrades);
       document.getElementById("refreshBalanceBtn").addEventListener("click", loadAccount);
       document.getElementById("claimBalanceBtn").addEventListener("click", claimRewards);
+      scanToggleBtn.addEventListener("click", toggleBotControl);
+      scanRefreshBtn.addEventListener("click", loadBotControl);
       document.getElementById("runBacktestBtn").addEventListener("click", runBacktest);
       runBacktestCompareBtn.addEventListener("click", runBacktestCompare);
       refreshModelsBtn.addEventListener("click", loadModelProfiles);
@@ -1875,10 +2034,12 @@
         await loadModelProfiles();
         await loadTrades();
         await loadAccount();
+        await loadBotControl();
         await loadLogs();
         setInterval(loadLogs, 2000);
         setInterval(loadTrades, 5000);
         setInterval(loadAccount, 10000);
+        setInterval(loadBotControl, 4000);
       })();
     </script>
   </body>

@@ -86,7 +86,7 @@ export interface LiveTradeRecord {
   matchedSize?: number;
   orderStatus?: string;
   officialPnlUsd?: number;
-  settlementSource?: "BINANCE_PROXY" | "POLYMARKET_OFFICIAL";
+  settlementSource?: "BINANCE_PROXY" | "POLYMARKET_OFFICIAL" | "POLYMARKET_MARK_PRICE";
 }
 
 export interface BotState {

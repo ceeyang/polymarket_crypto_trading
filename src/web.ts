@@ -10,6 +10,7 @@ import { Wallet } from "ethers";
 import { MAX_TARGETS, loadConfig, readRuntimeConfig, writeRuntimeConfig, type RuntimeConfigFile } from "./config.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
 import { getAllowedBacktestDays, runBacktestCompare, runBacktestDetailed } from "./services/backtest-service.js";
+import { readBotControlState, resolveBotControlMode, writeBotControlState } from "./services/bot-control.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
 import { deleteProfile, ensureDefaultProfiles, listProfiles, trainProfile, upsertProfile } from "./services/model-lab-service.js";
 import { StateStore } from "./services/state-store.js";
@@ -63,6 +64,12 @@ function parsePositiveInt(raw: string | null, fallback: number): number {
   return Math.floor(n);
 }
 
+function isCancelledTrade(t: LiveTradeRecord): boolean {
+  const status = String(t.orderStatus || "").trim().toUpperCase();
+  if (!status) return false;
+  return status.includes("CANCEL") || status === "EXPIRED" || status === "REJECTED";
+}
+
 function summarizeTrades(trades: LiveTradeRecord[]): {
   totalTrades: number;
   settledTrades: number;
@@ -71,20 +78,22 @@ function summarizeTrades(trades: LiveTradeRecord[]): {
   losses: number;
   winRate: number;
 } {
-  const settled = trades.filter((x) => x.resolved);
+  const settled = trades.filter((x) => x.resolved && !isCancelledTrade(x));
   const wins = settled.filter((x) => x.win).length;
   const losses = settled.length - wins;
+  const pending = trades.filter((x) => !x.resolved && !isCancelledTrade(x)).length;
   return {
     totalTrades: trades.length,
     settledTrades: settled.length,
-    pendingTrades: trades.length - settled.length,
+    pendingTrades: pending,
     wins,
     losses,
     winRate: settled.length > 0 ? wins / settled.length : 0,
   };
 }
 
-function statusText(t: LiveTradeRecord): "WIN" | "LOSE" | "PENDING" {
+function statusText(t: LiveTradeRecord): "WIN" | "LOSE" | "PENDING" | "CANCELED" {
+  if (isCancelledTrade(t)) return "CANCELED";
   if (!t.resolved) return "PENDING";
   return t.win ? "WIN" : "LOSE";
 }
@@ -255,6 +264,28 @@ function touchReloadSignal(): number {
   return ts;
 }
 
+function getBotControlView(): {
+  mode: "WEB_CONTROLLED" | "STANDALONE";
+  switchEnabled: boolean;
+  scanningEnabled: boolean;
+  effectiveScanning: boolean;
+  updatedAt: string;
+  updatedBy: string;
+} {
+  const mode = resolveBotControlMode(process.env.BOT_CONTROL_MODE);
+  const switchEnabled = mode === "WEB_CONTROLLED";
+  const state = readBotControlState();
+  const scanningEnabled = switchEnabled ? Boolean(state.scanningEnabled) : true;
+  return {
+    mode,
+    switchEnabled,
+    scanningEnabled,
+    effectiveScanning: scanningEnabled,
+    updatedAt: state.updatedAt,
+    updatedBy: state.updatedBy,
+  };
+}
+
 export function startServer(port = PORT, options?: { silent?: boolean }): http.Server {
   const server = http.createServer(async (req, res) => {
     try {
@@ -270,6 +301,37 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
           ? fs.readFileSync(UI_FILE, "utf8")
           : "<h1>UI file not found</h1>";
         sendText(res, 200, "text/html; charset=utf-8", html);
+        return;
+      }
+
+      if (method === "GET" && pathname === "/api/bot/control") {
+        sendJson(res, 200, getBotControlView());
+        return;
+      }
+
+      if (method === "PUT" && pathname === "/api/bot/control") {
+        const view = getBotControlView();
+        if (!view.switchEnabled) {
+          sendJson(res, 409, {
+            error: "bot control switch is disabled in standalone mode",
+            ...view,
+          });
+          return;
+        }
+        const body = await readBody(req);
+        let payload: any;
+        try {
+          payload = JSON.parse(body || "{}");
+        } catch {
+          sendJson(res, 400, { error: "invalid JSON body" });
+          return;
+        }
+        if (typeof payload?.scanningEnabled !== "boolean") {
+          sendJson(res, 400, { error: "scanningEnabled(boolean) is required" });
+          return;
+        }
+        writeBotControlState(payload.scanningEnabled, "web_ui");
+        sendJson(res, 200, getBotControlView());
         return;
       }
 

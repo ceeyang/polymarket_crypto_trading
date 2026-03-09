@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/dev.ts",
-    "bot": "tsx src/index.ts",
+    "bot": "tsx src/bot.ts",
+    "bot:only": "tsx src/bot.ts",
     "web": "tsx src/web.ts",
     "balance": "tsx src/balance.ts",
     "claim": "tsx src/claim.ts",

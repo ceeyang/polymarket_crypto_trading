@@ -6,6 +6,12 @@ import { isoNow } from "../utils.js";
 
 type TradeModeFilter = "LIVE" | "DRY_RUN" | "ALL";
 
+function isCancelledTrade(trade: LiveTradeRecord): boolean {
+  const status = String(trade.orderStatus || "").trim().toUpperCase();
+  if (!status) return false;
+  return status.includes("CANCEL") || status === "EXPIRED" || status === "REJECTED";
+}
+
 export class StateStore {
   private readonly filePath: string;
 
@@ -82,6 +88,7 @@ export class StateStore {
     const nowMs = Date.now();
 
     for (const t of trades) {
+      if (isCancelledTrade(t)) continue;
       if (t.resolved) continue;
       if (!this.matchesMode(t, mode)) continue;
       const settleMs = Date.parse(t.settleTime);
@@ -146,7 +153,7 @@ export class StateStore {
 
   getOpenTradeCount(mode: TradeModeFilter = "ALL"): number {
     const state = this.load();
-    return (state.trades ?? []).filter((x) => this.matchesMode(x, mode) && !x.resolved).length;
+    return (state.trades ?? []).filter((x) => this.matchesMode(x, mode) && !x.resolved && !isCancelledTrade(x)).length;
   }
 
   getConsecutiveLosses(mode: TradeModeFilter = "ALL"): number {
@@ -155,6 +162,7 @@ export class StateStore {
     let losses = 0;
     for (let i = trades.length - 1; i >= 0; i -= 1) {
       const t = trades[i];
+      if (isCancelledTrade(t)) continue;
       if (!t.resolved) continue;
       if (t.win) break;
       losses += 1;
@@ -174,6 +182,7 @@ export class StateStore {
     let losses = 0;
     for (let i = trades.length - 1; i >= 0; i -= 1) {
       const t = trades[i];
+      if (isCancelledTrade(t)) continue;
       if (!t.resolved) continue;
       if (t.win) break;
       losses += 1;
@@ -187,7 +196,7 @@ export class StateStore {
     wins: number;
     winRate: number;
   } {
-    const settled = trades.filter((x) => x.resolved);
+    const settled = trades.filter((x) => x.resolved && !isCancelledTrade(x));
     const wins = settled.filter((x) => x.win).length;
     return {
       totalTrades: trades.length,

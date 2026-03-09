@@ -10,6 +10,7 @@ import { GammaClient } from "./clients/gamma.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
 import { makeDecision } from "./strategy/decision.js";
 import { loadTrainedModel, predictWithTrainedModel, type TrainedModelArtifact } from "./strategy/trained-model.js";
+import { readBotControlState, resolveBotControlMode, type BotControlMode } from "./services/bot-control.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
 import { StateStore } from "./services/state-store.js";
 import { sleep } from "./utils.js";
@@ -104,6 +105,12 @@ function parseOutcomeWin(side: "YES" | "NO", raw: string): boolean | null {
   if (yesTokens.some((x) => s.includes(x))) return side === "YES";
   if (noTokens.some((x) => s.includes(x))) return side === "NO";
   return null;
+}
+
+function isCancelledOrderStatus(raw: unknown): boolean {
+  const s = String(raw || "").trim().toUpperCase();
+  if (!s) return false;
+  return s.includes("CANCEL") || s === "EXPIRED" || s === "REJECTED";
 }
 
 function parseStringArray(raw: unknown): string[] {
@@ -351,6 +358,7 @@ async function settleLiveTradesWithOfficial(cfg: Config, state: StateStore, sett
   const dueLive = trades.filter((t) => {
     const mode = t.executionMode ?? (t.orderId ? "LIVE" : "DRY_RUN");
     if (mode !== "LIVE") return false;
+    if (isCancelledOrderStatus(t.orderStatus)) return false;
     if (t.resolved) return false;
     const settleMs = Date.parse(t.settleTime);
     if (!Number.isFinite(settleMs)) return false;
@@ -359,15 +367,50 @@ async function settleLiveTradesWithOfficial(cfg: Config, state: StateStore, sett
   });
   if (!dueLive.length) return { due: 0, resolved: 0 };
 
-  const user = pickUserAddress(cfg);
-  if (!user) return { due: dueLive.length, resolved: 0 };
+  const marketCache = new Map<string, any | null>();
+  for (const t of dueLive) {
+    const marketId = String(t.marketId || "").trim();
+    if (!marketId || marketCache.has(marketId)) continue;
+    const market = await fetchGammaMarketById(cfg, marketId);
+    marketCache.set(marketId, market);
+  }
 
-  const closed = await fetchClosedPositionsMap(cfg, user);
-  if (!closed.byCondition.size && !closed.byMarketId.size) return { due: dueLive.length, resolved: 0 };
+  let closed: Awaited<ReturnType<typeof fetchClosedPositionsMap>> | null = null;
 
   let changed = false;
   let resolved = 0;
   for (const t of dueLive) {
+    const market = marketCache.get(String(t.marketId || "").trim()) ?? null;
+    const outcomes = parseStringArray(market?.outcomes);
+    const prices = parseNumberArray(
+      market?.outcomePrices
+      ?? market?.outcome_prices
+      ?? market?.resolutionPrices
+      ?? market?.resolution_prices
+      ?? market?.finalOutcomePrices
+      ?? market?.final_outcome_prices,
+    );
+    const sideIdx = sideToOutcomeIdx(t.side, outcomes);
+    const priceBySide = sideIdx != null && sideIdx >= 0 && sideIdx < prices.length ? prices[sideIdx] : null;
+    const entryPrice = parseFinite(t.entryPrice ?? t.entryRefPrice);
+    if (entryPrice != null && priceBySide != null && Number.isFinite(priceBySide)) {
+      t.resolved = true;
+      t.win = priceBySide > entryPrice;
+      t.settleRefPrice = Number(priceBySide.toFixed(6));
+      t.settlementSource = "POLYMARKET_MARK_PRICE";
+      changed = true;
+      resolved += 1;
+      continue;
+    }
+
+    if (closed == null) {
+      const user = pickUserAddress(cfg);
+      if (user) {
+        closed = await fetchClosedPositionsMap(cfg, user);
+      } else {
+        closed = { byCondition: new Map(), byMarketId: new Map() };
+      }
+    }
     const cid = normalizeConditionId(t.conditionId);
     const row = (cid ? closed.byCondition.get(cid) : undefined)
       ?? closed.byMarketId.get(String(t.marketId));
@@ -493,45 +536,6 @@ function toFiniteNumber(raw: unknown, fallback = NaN): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-async function waitForMatchedSize(
-  trader: PolymarketTrader,
-  orderId: string,
-): Promise<{ matchedSize: number; status: string }> {
-  let status = "UNKNOWN";
-  let matchedSize = 0;
-
-  for (let i = 0; i < 3; i += 1) {
-    try {
-      const ord = await trader.getOrder(orderId);
-      status = String(ord?.status ?? status);
-      matchedSize = Math.max(0, toFiniteNumber(ord?.size_matched ?? ord?.sizeMatched ?? 0, 0));
-      if (matchedSize > 0) {
-        return { matchedSize, status };
-      }
-      const s = status.toUpperCase();
-      if (s === "CANCELED" || s === "CANCELLED" || s === "EXPIRED" || s === "REJECTED") {
-        return { matchedSize, status };
-      }
-    } catch {
-      // retry on eventual-consistency / temporary request failure
-    }
-    if (i < 2) {
-      await sleep(400);
-    }
-  }
-  return { matchedSize, status };
-}
-
-function isTerminalOrderStatus(status: string): boolean {
-  const s = String(status || "").trim().toUpperCase();
-  return s === "MATCHED"
-    || s === "FILLED"
-    || s === "CANCELED"
-    || s === "CANCELLED"
-    || s === "EXPIRED"
-    || s === "REJECTED";
-}
-
 async function cancelOrderBestEffort(
   trader: PolymarketTrader,
   orderId: string,
@@ -551,6 +555,100 @@ async function cancelOrderBestEffort(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+async function syncLiveOrdersAndCancelStale(
+  state: StateStore,
+  trader: PolymarketTrader,
+): Promise<{ checked: number; updated: number; canceled: number; finalizedCanceled: number }> {
+  const snapshot = state.load();
+  const trades = snapshot.trades ?? [];
+  const nowMs = Date.now();
+  let checked = 0;
+  let updated = 0;
+  let canceled = 0;
+  let finalizedCanceled = 0;
+  let changed = false;
+
+  for (const t of trades) {
+    const mode = t.executionMode ?? (t.orderId ? "LIVE" : "DRY_RUN");
+    if (mode !== "LIVE") continue;
+    if (t.resolved) continue;
+    if (!t.orderId || !String(t.orderId).trim()) continue;
+    checked += 1;
+
+    const orderId = String(t.orderId);
+    try {
+      const ord = await trader.getOrder(orderId);
+      const status = String(ord?.status ?? t.orderStatus ?? "UNKNOWN");
+      const matchedSize = Math.max(0, toFiniteNumber(ord?.size_matched ?? ord?.sizeMatched ?? t.matchedSize ?? 0, 0));
+      const prevStatus = String(t.orderStatus ?? "");
+      const prevMatchedSize = Math.max(0, Number(t.matchedSize ?? 0));
+
+      if (status !== prevStatus || Math.abs(matchedSize - prevMatchedSize) > 1e-9) {
+        t.orderStatus = status;
+        t.matchedSize = matchedSize;
+        changed = true;
+        updated += 1;
+      }
+
+      const settleMs = Date.parse(t.settleTime);
+      if (
+        matchedSize <= 0
+        && Number.isFinite(settleMs)
+        && nowMs >= settleMs
+        && !isCancelledOrderStatus(status)
+      ) {
+        await cancelOrderBestEffort(trader, orderId, {
+          label: t.targetId || "LIVE_ORDER",
+          reason: "previous_market_unfilled",
+        });
+        t.orderStatus = "CANCELED_PREV_MARKET_UNFILLED";
+        t.matchedSize = 0;
+        t.entryNotionalUsd = 0;
+        t.resolved = true;
+        t.settlementSource = "POLYMARKET_MARK_PRICE";
+        canceled += 1;
+        changed = true;
+        continue;
+      }
+
+      if (isCancelledOrderStatus(status) && matchedSize <= 0) {
+        t.orderStatus = status;
+        t.matchedSize = 0;
+        t.entryNotionalUsd = 0;
+        t.resolved = true;
+        t.settlementSource = "POLYMARKET_MARK_PRICE";
+        finalizedCanceled += 1;
+        changed = true;
+        continue;
+      }
+
+      if (matchedSize > 0) {
+        if (!Number.isFinite(Number(t.entryPrice)) || Number(t.entryPrice) <= 0) {
+          const fallback = Number.isFinite(Number(t.entryRefPrice)) ? Number(t.entryRefPrice) : 0.5;
+          const avgPrice = await trader.getAverageFillPrice(orderId, fallback).catch(() => fallback);
+          if (Number.isFinite(avgPrice) && avgPrice > 0) {
+            t.entryPrice = avgPrice;
+            changed = true;
+          }
+        }
+        const px = Number(t.entryPrice);
+        if ((!Number.isFinite(Number(t.entryNotionalUsd)) || Number(t.entryNotionalUsd) <= 0) && Number.isFinite(px) && px > 0) {
+          t.entryNotionalUsd = Number((px * matchedSize).toFixed(6));
+          changed = true;
+        }
+      }
+    } catch {
+      // ignore single-order sync errors, retry next round
+    }
+  }
+
+  if (changed) {
+    snapshot.trades = trades;
+    state.save(snapshot);
+  }
+  return { checked, updated, canceled, finalizedCanceled };
 }
 
 function startOfLocalDayIso(now = new Date()): string {
@@ -612,6 +710,10 @@ interface RuntimeContext {
   trader: PolymarketTrader;
   activeTargets: MarketTarget[];
   targetModels: Map<string, TrainedModelArtifact>;
+}
+
+export interface StartBotOptions {
+  controlMode?: BotControlMode;
 }
 
 function loadTargetModels(cfg: Config, targets: MarketTarget[]): Map<string, TrainedModelArtifact> {
@@ -694,7 +796,8 @@ async function buildRuntimeContext(cfgKey: string, reloadToken: number): Promise
   };
 }
 
-export async function startBot(): Promise<void> {
+export async function startBot(options?: StartBotOptions): Promise<void> {
+  const controlMode = options?.controlMode ?? resolveBotControlMode(process.env.BOT_CONTROL_MODE);
   const binance = new BinanceClient();
   const state = new StateStore();
   const sessionStartedAt = new Date().toISOString();
@@ -705,6 +808,7 @@ export async function startBot(): Promise<void> {
   let lastBalanceCheckAtMs = 0;
   let balanceCheckInFlight = false;
   let peakCollateralUsdc: number | null = null;
+  let lastScanEnabled: boolean | null = null;
 
   const reloadRuntime = async (reason: string): Promise<RuntimeContext> => {
     const cfgKey = readConfigKey();
@@ -719,7 +823,7 @@ export async function startBot(): Promise<void> {
       runtime = next;
 
       if (isStartup) {
-        log(`bot started dryRun=${next.cfg.dryRun} interval=${next.cfg.pollIntervalSec}s targets=${next.activeTargets.length}`);
+        log(`bot started dryRun=${next.cfg.dryRun} interval=${next.cfg.pollIntervalSec}s targets=${next.activeTargets.length} controlMode=${controlMode}`);
         log(`session started at ${sessionStartedAt}`);
       } else {
         log("runtime reloaded", {
@@ -727,6 +831,7 @@ export async function startBot(): Promise<void> {
           dryRun: next.cfg.dryRun,
           pollIntervalSec: next.cfg.pollIntervalSec,
           targets: next.activeTargets.length,
+          controlMode,
         });
       }
       log(`auto claim enabled=${next.cfg.autoClaim} cooldown=${next.cfg.claimCooldownSec}s`);
@@ -768,7 +873,11 @@ export async function startBot(): Promise<void> {
       pruneCycleOrderLocks(targetCycleLocks);
 
       if (!cfg.dryRun) {
-        const official = await settleLiveTradesWithOfficial(cfg, state, 90_000);
+        const liveSync = await syncLiveOrdersAndCancelStale(state, trader);
+        if (liveSync.updated > 0 || liveSync.canceled > 0 || liveSync.finalizedCanceled > 0) {
+          log("live order sync", liveSync);
+        }
+        const official = await settleLiveTradesWithOfficial(cfg, state, 0);
         if (official.resolved > 0) {
           log("official settlement synced", official);
         }
@@ -899,6 +1008,22 @@ export async function startBot(): Promise<void> {
       if (lastRiskGateKey) {
         log("risk gate cleared", { key: lastRiskGateKey });
         lastRiskGateKey = "";
+      }
+
+      const controlState = readBotControlState();
+      const scanEnabled = controlMode === "STANDALONE" ? true : Boolean(controlState.scanningEnabled);
+      if (scanEnabled !== lastScanEnabled) {
+        log("scan state updated", {
+          controlMode,
+          scanningEnabled: scanEnabled,
+          switchState: controlState.scanningEnabled,
+          updatedAt: controlState.updatedAt,
+          updatedBy: controlState.updatedBy,
+        });
+        lastScanEnabled = scanEnabled;
+      }
+      if (!scanEnabled) {
+        continue;
       }
 
       const tradedMarketIds = state.getTradedMarketIds();
@@ -1061,28 +1186,6 @@ export async function startBot(): Promise<void> {
 
         state.markMarketAttempt(order.best.marketId);
         targetCycleLocks.set(order.target.id, cycleOrderLockExpireMs(order.best.endDate));
-
-        const fill = await waitForMatchedSize(trader, orderId);
-        if (fill.matchedSize <= 0) {
-          if (!isTerminalOrderStatus(fill.status)) {
-            await cancelOrderBestEffort(trader, orderId, { label: order.label, reason: "no_fill_timeout" });
-          }
-          log(`[${order.label}] skip record: order not filled`, {
-            orderId,
-            status: fill.status,
-            matchedSize: fill.matchedSize,
-          });
-          tradedMarketIds.add(order.best.marketId);
-          continue;
-        }
-
-        const entryPrice = await trader.getAverageFillPrice(orderId, order.decision.limitPrice)
-          .catch(() => order.decision.limitPrice);
-
-        if (!isTerminalOrderStatus(fill.status)) {
-          await cancelOrderBestEffort(trader, orderId, { label: order.label, reason: "partial_fill_cancel_rest" });
-        }
-
         state.recordTrade({
           marketId: order.best.marketId,
           conditionId: order.best.conditionId,
@@ -1096,12 +1199,12 @@ export async function startBot(): Promise<void> {
           entryTime: new Date().toISOString(),
           settleTime: order.best.endDate,
           entryRefPrice: order.entryRefPrice,
-          entryPrice,
-          entryNotionalUsd: Number((entryPrice * fill.matchedSize).toFixed(6)),
+          entryPrice: order.decision.limitPrice,
+          entryNotionalUsd: 0,
           resolved: false,
           orderId,
-          matchedSize: fill.matchedSize,
-          orderStatus: fill.status,
+          matchedSize: 0,
+          orderStatus: String(response?.status ?? "OPEN"),
         });
         tradedMarketIds.add(order.best.marketId);
       }
