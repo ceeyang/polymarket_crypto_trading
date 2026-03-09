@@ -48,7 +48,11 @@ export function hasEthKeyword(text: string): boolean {
 
 export function has5mHint(text: string): boolean {
   const s = text.toLowerCase();
-  return ["5m", "5 min", "5-min", "5 minute", "5 minutes", "5分钟"].some((h) => s.includes(h));
+  return (
+    /\b5m\b/.test(s)
+    || /\b5\s*min(?:ute)?s?\b/.test(s)
+    || /5分钟/.test(s)
+  );
 }
 
 export function hasClockHint(text: string): boolean {

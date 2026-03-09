@@ -44,6 +44,14 @@ export class StateStore {
     return new Set(Object.keys(state.tradedMarkets ?? {}));
   }
 
+  markMarketAttempt(marketId: string): void {
+    const id = String(marketId || "").trim();
+    if (!id) return;
+    const state = this.load();
+    state.tradedMarkets[id] = isoNow();
+    this.save(state);
+  }
+
   recordTrade(trade: LiveTradeRecord): void {
     const state = this.load();
     state.tradedMarkets[trade.marketId] = isoNow();
@@ -61,35 +69,6 @@ export class StateStore {
       state.tradedMarkets = {};
     }
     this.save(state);
-  }
-
-  canTradeByCooldown(cooldownSeconds: number, targetId?: string, mode: TradeModeFilter = "ALL"): boolean {
-    if (cooldownSeconds <= 0) return true;
-    const state = this.load();
-    const trades = (state.trades ?? []).filter((x) => this.matchesMode(x, mode));
-
-    if (targetId) {
-      let latestMs = NaN;
-      for (let i = trades.length - 1; i >= 0; i -= 1) {
-        const t = trades[i];
-        if (t.targetId !== targetId) continue;
-        latestMs = Date.parse(t.entryTime);
-        break;
-      }
-      if (!Number.isFinite(latestMs)) return true;
-      return Date.now() - latestMs >= cooldownSeconds * 1000;
-    }
-
-    if (trades.length === 0) return true;
-    let latestMs = NaN;
-    for (let i = trades.length - 1; i >= 0; i -= 1) {
-      const t = Date.parse(trades[i].entryTime);
-      if (!Number.isFinite(t)) continue;
-      latestMs = t;
-      break;
-    }
-    if (!Number.isFinite(latestMs)) return true;
-    return Date.now() - latestMs >= cooldownSeconds * 1000;
   }
 
   async settleDueTrades(

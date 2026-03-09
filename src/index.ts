@@ -53,7 +53,7 @@ function isCurrentWindowByEnd(endDate: string, horizonMin: number, nowMs = Date.
   const expectedEndMs = Math.floor(nowMs / intervalMs) * intervalMs + intervalMs;
   const alignDiffMs = Math.abs(endMs - expectedEndMs);
   const minsToEnd = (endMs - nowMs) / 60000;
-  const ok = minsToEnd > 0 && alignDiffMs <= 90_000;
+  const ok = minsToEnd > 0 && alignDiffMs <= 15_000;
   return { ok, minsToEnd, alignDiffMs };
 }
 
@@ -522,10 +522,55 @@ async function waitForMatchedSize(
   return { matchedSize, status };
 }
 
+function isTerminalOrderStatus(status: string): boolean {
+  const s = String(status || "").trim().toUpperCase();
+  return s === "MATCHED"
+    || s === "FILLED"
+    || s === "CANCELED"
+    || s === "CANCELLED"
+    || s === "EXPIRED"
+    || s === "REJECTED";
+}
+
+async function cancelOrderBestEffort(
+  trader: PolymarketTrader,
+  orderId: string,
+  context: { label: string; reason: string },
+): Promise<void> {
+  try {
+    const resp = await trader.cancelOrder(orderId);
+    log(`[${context.label}] cancel order`, {
+      orderId,
+      reason: context.reason,
+      response: resp,
+    });
+  } catch (err) {
+    log(`[${context.label}] cancel order failed`, {
+      orderId,
+      reason: context.reason,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 function startOfLocalDayIso(now = new Date()): string {
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
+}
+
+function pruneCycleOrderLocks(locks: Map<string, number>, nowMs = Date.now()): void {
+  for (const [key, expireMs] of locks.entries()) {
+    if (!Number.isFinite(expireMs) || expireMs <= nowMs) {
+      locks.delete(key);
+    }
+  }
+}
+
+function cycleOrderLockExpireMs(endDate: string): number {
+  const settleMs = Date.parse(endDate);
+  if (Number.isFinite(settleMs) && settleMs > 0) return settleMs;
+  return Date.now() + 15 * 60_000;
 }
 
 interface PreparedOrder {
@@ -653,6 +698,7 @@ export async function startBot(): Promise<void> {
   const binance = new BinanceClient();
   const state = new StateStore();
   const sessionStartedAt = new Date().toISOString();
+  const targetCycleLocks = new Map<string, number>();
   let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
   let autoClaimInFlight = false;
@@ -719,6 +765,7 @@ export async function startBot(): Promise<void> {
     try {
       const currentRuntime = await reloadRuntime("round_begin");
       const { cfg, gamma, trader, activeTargets, targetModels } = currentRuntime;
+      pruneCycleOrderLocks(targetCycleLocks);
 
       if (!cfg.dryRun) {
         const official = await settleLiveTradesWithOfficial(cfg, state, 90_000);
@@ -880,14 +927,12 @@ export async function startBot(): Promise<void> {
       const prepared = await Promise.all(activeContexts.map(async (ctx): Promise<PreparedOrder | null> => {
         const { target, label, model, symbol, mergedCfg } = ctx;
         try {
+          if (targetCycleLocks.has(target.id)) {
+            return null;
+          }
           const markets = await gamma.getCandidateMarketsForTarget(target, 500);
           const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
           if (!best) return null;
-
-          if (!state.canTradeByCooldown(cfg.cooldownSeconds, target.id, perfMode)) {
-            log(`[${label}] skip: cooldown active (${cfg.cooldownSeconds}s)`);
-            return null;
-          }
 
           const windowCheck = isCurrentWindowByEnd(best.endDate, target.horizonMin);
           if (!windowCheck.ok) {
@@ -908,7 +953,7 @@ export async function startBot(): Promise<void> {
             return null;
           }
 
-          const decision = makeDecision(pred, best, mergedCfg);
+          const decision = makeDecision(pred, best, mergedCfg, target.horizonMin);
           if (decision.action === "SKIP" || !decision.side || !decision.tokenId || !decision.limitPrice || !decision.shareSize) {
             return null;
           }
@@ -940,10 +985,7 @@ export async function startBot(): Promise<void> {
 
       for (const order of readyOrders) {
         if (tradedMarketIds.has(order.best.marketId)) continue;
-        if (!state.canTradeByCooldown(cfg.cooldownSeconds, order.target.id, perfMode)) {
-          log(`[${order.label}] skip: cooldown active (${cfg.cooldownSeconds}s)`);
-          continue;
-        }
+        if (targetCycleLocks.has(order.target.id)) continue;
 
         log(`[${order.label}] selected market`, {
           marketId: order.best.marketId,
@@ -967,6 +1009,7 @@ export async function startBot(): Promise<void> {
 
         log(`[${order.label}] order response`, response);
         if (response?.dryRun || cfg.dryRun) {
+          targetCycleLocks.set(order.target.id, cycleOrderLockExpireMs(order.best.endDate));
           state.recordTrade({
             marketId: order.best.marketId,
             conditionId: order.best.conditionId,
@@ -998,13 +1041,32 @@ export async function startBot(): Promise<void> {
         const orderIdRaw = response?.orderID ?? response?.orderId ?? response?.id;
         const orderId = orderIdRaw ? String(orderIdRaw) : undefined;
         if (!orderId) {
+          state.markMarketAttempt(order.best.marketId);
           log(`[${order.label}] skip record: missing order id`, response);
           tradedMarketIds.add(order.best.marketId);
           continue;
         }
 
+        const intendedNotional = order.decision.limitPrice * order.decision.shareSize;
+        if (!Number.isFinite(intendedNotional) || intendedNotional <= 0 || intendedNotional > cfg.maxOrderNotionalUsd + 1e-6) {
+          log(`[${order.label}] risk guard: cancel abnormal notional order`, {
+            orderId,
+            intendedNotional: Number.isFinite(intendedNotional) ? Number(intendedNotional.toFixed(6)) : intendedNotional,
+            maxOrderNotionalUsd: cfg.maxOrderNotionalUsd,
+          });
+          await cancelOrderBestEffort(trader, orderId, { label: order.label, reason: "abnormal_notional" });
+          tradedMarketIds.add(order.best.marketId);
+          continue;
+        }
+
+        state.markMarketAttempt(order.best.marketId);
+        targetCycleLocks.set(order.target.id, cycleOrderLockExpireMs(order.best.endDate));
+
         const fill = await waitForMatchedSize(trader, orderId);
         if (fill.matchedSize <= 0) {
+          if (!isTerminalOrderStatus(fill.status)) {
+            await cancelOrderBestEffort(trader, orderId, { label: order.label, reason: "no_fill_timeout" });
+          }
           log(`[${order.label}] skip record: order not filled`, {
             orderId,
             status: fill.status,
@@ -1016,6 +1078,10 @@ export async function startBot(): Promise<void> {
 
         const entryPrice = await trader.getAverageFillPrice(orderId, order.decision.limitPrice)
           .catch(() => order.decision.limitPrice);
+
+        if (!isTerminalOrderStatus(fill.status)) {
+          await cancelOrderBestEffort(trader, orderId, { label: order.label, reason: "partial_fill_cancel_rest" });
+        }
 
         state.recordTrade({
           marketId: order.best.marketId,

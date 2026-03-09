@@ -1,4 +1,4 @@
-import { ClobClient, Side } from "@polymarket/clob-client";
+import { ClobClient, OrderType, Side } from "@polymarket/clob-client";
 import { Wallet } from "ethers";
 
 import type { Config } from "../config.js";
@@ -94,6 +94,16 @@ export class PolymarketTrader {
     return this.client.getOrder(orderId);
   }
 
+  async cancelOrder(orderId: string): Promise<any> {
+    if (!this.client) {
+      throw new Error("Polymarket client unavailable");
+    }
+    if (typeof this.client.cancelOrder !== "function") {
+      throw new Error("Clob client does not support cancelOrder");
+    }
+    return this.client.cancelOrder({ orderID: orderId });
+  }
+
   async getTrades(params?: Record<string, string>): Promise<any[]> {
     if (!this.client) {
       throw new Error("Polymarket client unavailable");
@@ -172,12 +182,12 @@ export class PolymarketTrader {
     };
 
     if (typeof this.client.createAndPostOrder === "function") {
-      return this.client.createAndPostOrder(order, options);
+      return this.client.createAndPostOrder(order, options, (OrderType as any).GTC ?? "GTC");
     }
 
     if (typeof this.client.createOrder === "function" && typeof this.client.postOrder === "function") {
       const signed = await this.client.createOrder(order, options);
-      return this.client.postOrder(signed, options);
+      return this.client.postOrder(signed, (OrderType as any).GTC ?? "GTC");
     }
 
     throw new Error("Unsupported clob client: no order posting method found");

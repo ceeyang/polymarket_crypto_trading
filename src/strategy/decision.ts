@@ -2,107 +2,74 @@ import type { Config } from "../config.js";
 import type { Prediction, SelectedMarket, TradeDecision } from "../types.js";
 import { clamp } from "../utils.js";
 
-export function makeDecision(pred: Prediction, market: SelectedMarket, cfg: Config): TradeDecision {
+export function makeDecision(pred: Prediction, market: SelectedMarket, cfg: Config, horizonMin?: number): TradeDecision {
   const pUp = pred.probUp;
   const pDown = 1 - pUp;
   const preferredSide = pUp >= 0.5 ? "YES" : "NO";
-  const overround = market.yesPrice + market.noPrice;
-  if (overround < cfg.minOverround || overround > cfg.maxOverround) {
-    return {
-      action: "SKIP",
-      reason: `overround out of range (${overround.toFixed(4)} not in ${cfg.minOverround.toFixed(4)}-${cfg.maxOverround.toFixed(4)})`,
-      edge: 0,
-    };
-  }
-
-  // 防止“轮询末尾追单”：至少保留两个轮询周期的决策窗口，并受配置最小值约束。
-  const minEntrySeconds = Math.max(cfg.minEntrySeconds, cfg.pollIntervalSec * 2);
-  const remainingSeconds = Math.max(0, market.minsLeft * 60);
-  if (remainingSeconds < minEntrySeconds) {
-    return {
-      action: "SKIP",
-      reason: `time too short (${remainingSeconds.toFixed(1)}s < min ${minEntrySeconds}s)`,
-      edge: 0,
-    };
-  }
-
   const edgeYes = pUp - market.yesPrice;
   const edgeNo = pDown - market.noPrice;
-  const bestEdge = Math.max(edgeYes, edgeNo);
+  const chosenEdge = preferredSide === "YES" ? edgeYes : edgeNo;
 
-  if (bestEdge < cfg.minEdge) {
+  // 仅允许在每个盘口开始后的前 N 秒内挂单（默认 60s）。
+  const cycleSeconds = Number.isFinite(Number(horizonMin)) ? Math.max(1, Math.floor(Number(horizonMin))) * 60 : NaN;
+  const entryWindowSec = Math.max(10, Math.floor(cfg.cycleStartWindowSec || 60));
+  const remainingSeconds = Math.max(0, market.minsLeft * 60);
+  if (Number.isFinite(cycleSeconds)) {
+    const cycleStartBoundary = cycleSeconds - entryWindowSec;
+    if (remainingSeconds < cycleStartBoundary) {
+      return {
+        action: "SKIP",
+        reason: `outside cycle-start window (${remainingSeconds.toFixed(1)}s left, need >= ${cycleStartBoundary}s)`,
+        edge: 0,
+      };
+    }
+  } else if (remainingSeconds < Math.max(cfg.minEntrySeconds, cfg.pollIntervalSec * 2)) {
     return {
       action: "SKIP",
-      reason: `edge too small (best=${bestEdge.toFixed(4)} < min=${cfg.minEdge.toFixed(4)})`,
-      edge: bestEdge,
+      reason: `time too short (${remainingSeconds.toFixed(1)}s)`,
+      edge: 0,
     };
   }
 
-  const candidates = [
-    { side: "YES" as const, tokenId: market.yesTokenId, marketPrice: market.yesPrice, edge: edgeYes, modelProb: pUp },
-    { side: "NO" as const, tokenId: market.noTokenId, marketPrice: market.noPrice, edge: edgeNo, modelProb: pDown },
-  ].sort((a, b) => b.edge - a.edge);
-
-  let reverseRejected = false;
-  let reverseDisabled = false;
-  let priceRejected = false;
-  for (const c of candidates) {
-    if (c.edge < cfg.minEdge) continue;
-    if (c.marketPrice < cfg.minEntryPrice || c.marketPrice > cfg.maxEntryPrice) {
-      priceRejected = true;
-      continue;
-    }
-
-    // 允许反向兜底，但只在“时间更充足 + 概率不极低 + edge更强”时放行。
-    if (c.side !== preferredSide) {
-      if (!cfg.enableReverseFallback) {
-        reverseDisabled = true;
-        continue;
-      }
-      const reverseEdgeMin = cfg.minEdge * cfg.reverseMinEdgeMultiplier;
-      if (remainingSeconds < cfg.reverseMinEntrySeconds) {
-        reverseRejected = true;
-        continue;
-      }
-      if (c.modelProb < cfg.reverseMinModelProb || c.edge < reverseEdgeMin) {
-        reverseRejected = true;
-        continue;
-      }
-    }
-
-    const limitPrice = clamp(c.marketPrice + cfg.priceAggression, 0.01, 0.99);
-    const desiredUsd = clamp(
-      cfg.baseBetUsd * (c.edge / cfg.minEdge),
-      cfg.baseBetUsd,
-      cfg.maxBetUsd,
-    );
-    const minUsdForShares = cfg.minOrderShares * limitPrice;
-    const usdSize = Math.max(desiredUsd, minUsdForShares);
-
-    if (usdSize > cfg.maxBetUsd) continue;
-
-    const shareSize = usdSize / limitPrice;
+  const tokenId = preferredSide === "YES" ? market.yesTokenId : market.noTokenId;
+  if (!tokenId) {
     return {
-      action: "BUY",
-      reason: `edge=${c.edge.toFixed(4)} side=${c.side} marketPrice=${c.marketPrice.toFixed(4)} predUp=${pUp.toFixed(4)}`,
-      side: c.side,
-      tokenId: c.tokenId,
-      limitPrice,
-      usdSize,
-      shareSize,
-      edge: c.edge,
+      action: "SKIP",
+      reason: "invalid side token",
+      edge: 0,
     };
   }
 
+  if (chosenEdge < cfg.minEdge) {
+    return {
+      action: "SKIP",
+      reason: `no trade signal (edge=${chosenEdge.toFixed(4)} < minEdge=${cfg.minEdge.toFixed(4)})`,
+      edge: chosenEdge,
+    };
+  }
+
+  const limitPrice = clamp(Number(cfg.fixedOrderPrice || 0.45), 0.01, 0.99);
+  const sideMarketPrice = preferredSide === "YES" ? market.yesPrice : market.noPrice;
+  const passiveBuffer = Math.max(0.001, Number(market.tickSize || 0.001));
+  if (limitPrice >= sideMarketPrice - passiveBuffer) {
+    return {
+      action: "SKIP",
+      reason: `not passive enough (limit=${limitPrice.toFixed(4)} market=${sideMarketPrice.toFixed(4)} buffer=${passiveBuffer.toFixed(4)})`,
+      edge: chosenEdge,
+    };
+  }
+
+  const usdCap = Math.max(0.1, Number(cfg.maxOrderNotionalUsd || 2.5));
+  const usdSize = usdCap;
+  const shareSize = usdSize / limitPrice;
   return {
-    action: "SKIP",
-    reason: reverseDisabled
-      ? "reverse fallback disabled"
-      : reverseRejected
-      ? "reverse fallback rejected by guard (time/probability/price)"
-      : priceRejected
-        ? `entry price out of range (${cfg.minEntryPrice.toFixed(2)}-${cfg.maxEntryPrice.toFixed(2)})`
-      : `min shares unmet under max bet (max=${cfg.maxBetUsd.toFixed(4)} minShares=${cfg.minOrderShares.toFixed(2)})`,
-    edge: bestEdge,
+    action: "BUY",
+    reason: `fixed-price order side=${preferredSide} price=${limitPrice.toFixed(4)} usd=${usdSize.toFixed(4)} predUp=${pUp.toFixed(4)}`,
+    side: preferredSide,
+    tokenId,
+    limitPrice,
+    usdSize,
+    shareSize,
+    edge: chosenEdge,
   };
 }

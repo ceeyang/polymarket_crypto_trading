@@ -64,8 +64,11 @@ export interface RuntimeConfigFile {
     lookbackMinutes: number;
     trainedModelPath: string;
     minEdge: number;
-    baseBetUsd: number;
-    maxBetUsd: number;
+    baseBetUsd?: number;
+    maxOrderNotionalUsd?: number;
+    fixedOrderPrice?: number;
+    cycleStartWindowSec?: number;
+    maxBetUsd?: number;
     minOrderShares?: number;
     priceAggression: number;
     minEntryPrice?: number;
@@ -82,7 +85,6 @@ export interface RuntimeConfigFile {
     minMarketLiquidity: number;
     minTimeToExpiryMin: number;
     maxTimeToExpiryMin: number;
-    cooldownSeconds: number;
     minEntrySeconds?: number;
   };
   network: {
@@ -114,6 +116,9 @@ export interface Config {
   trainedModelPath: string;
   minEdge: number;
   baseBetUsd: number;
+  maxOrderNotionalUsd: number;
+  fixedOrderPrice: number;
+  cycleStartWindowSec: number;
   maxBetUsd: number;
   minOrderShares: number;
   priceAggression: number;
@@ -128,7 +133,6 @@ export interface Config {
   minMarketLiquidity: number;
   minTimeToExpiryMin: number;
   maxTimeToExpiryMin: number;
-  cooldownSeconds: number;
   minEntrySeconds: number;
   polyHost: string;
   gammaHost: string;
@@ -186,6 +190,13 @@ function parseNonNegativeInt(raw: unknown, fallback: number): number {
 function parsePositiveNumber(raw: unknown, fallback: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n;
+}
+
+function normalizeFixedOrderPrice(raw: unknown, fallback: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  if (n > 1 && n <= 100) return n / 100;
   return n;
 }
 
@@ -252,8 +263,8 @@ function normalizeTargets(rawTargets: Partial<MarketTarget>[] | undefined, defau
         : getDefaultModelPathForTarget(coin, horizonMin) || defaultModelPath,
       lookbackMinutes: t.lookbackMinutes == null ? undefined : parsePositiveInt(t.lookbackMinutes, 120),
       minEdge: t.minEdge == null ? undefined : parsePositiveNumber(t.minEdge, 0.02),
-      baseBetUsd: t.baseBetUsd == null ? undefined : parsePositiveNumber(t.baseBetUsd, 1.5),
-      maxBetUsd: t.maxBetUsd == null ? undefined : parsePositiveNumber(t.maxBetUsd, 2.6),
+      baseBetUsd: t.baseBetUsd == null ? undefined : parsePositiveNumber(t.baseBetUsd, 2.5),
+      maxBetUsd: t.maxBetUsd == null ? undefined : parsePositiveNumber(t.maxBetUsd, 2.5),
       minOrderShares: t.minOrderShares == null ? undefined : parsePositiveNumber(t.minOrderShares, 5),
       priceAggression: t.priceAggression == null ? undefined : parsePositiveNumber(t.priceAggression, 0.01),
       trainStart: typeof t.trainStart === "string" && t.trainStart.trim() ? t.trainStart.trim() : undefined,
@@ -306,16 +317,22 @@ export function loadConfig(): Config {
   const maxOpenTrades = parseNonNegativeInt(rc.runtime.maxOpenTrades, 6);
   const maxTradesPerDay = parseNonNegativeInt(rc.runtime.maxTradesPerDay, 120);
   const maxConsecutiveLosses = parseNonNegativeInt(rc.runtime.maxConsecutiveLosses, 4);
+  const maxOrderNotionalUsd = parsePositiveNumber(rc.prediction.maxOrderNotionalUsd, 2.5);
+  const baseBetUsd = parsePositiveNumber(rc.prediction.baseBetUsd, maxOrderNotionalUsd);
+  const fixedOrderPriceRaw = normalizeFixedOrderPrice(rc.prediction.fixedOrderPrice, 0.45);
+  const fixedOrderPrice = Math.max(0.01, Math.min(0.99, fixedOrderPriceRaw));
+  const cycleStartWindowSec = parsePositiveInt(rc.prediction.cycleStartWindowSec, 60);
+  const maxBetUsd = parsePositiveNumber(rc.prediction.maxBetUsd, Math.max(baseBetUsd, maxOrderNotionalUsd));
   const minOrderShares = parsePositiveNumber(rc.prediction.minOrderShares, 5);
   const minEntryPrice = parsePositiveNumber(rc.prediction.minEntryPrice, 0.05);
   const maxEntryPrice = parsePositiveNumber(rc.prediction.maxEntryPrice, 0.90);
   const minOverround = parsePositiveNumber(rc.prediction.minOverround, 0.95);
   const maxOverround = parsePositiveNumber(rc.prediction.maxOverround, 1.06);
-  const enableReverseFallback = Boolean(rc.prediction.enableReverseFallback ?? false);
-  const reverseMinEntrySeconds = parsePositiveInt(rc.prediction.reverseMinEntrySeconds, 90);
-  const reverseMinModelProbRaw = parseNonNegativeNumber(rc.prediction.reverseMinModelProb, 0.42);
-  const reverseMinEdgeMultiplier = parsePositiveNumber(rc.prediction.reverseMinEdgeMultiplier, 1.3);
-  const reverseMinModelProb = Math.max(0, Math.min(1, reverseMinModelProbRaw));
+  // Reverse fallback is fully disabled by design.
+  const enableReverseFallback = false;
+  const reverseMinEntrySeconds = 90;
+  const reverseMinModelProb = 0.42;
+  const reverseMinEdgeMultiplier = 1.3;
   const minEntrySeconds = parsePositiveInt(rc.marketFilter.minEntrySeconds, 45);
   const targets = normalizeTargets(rc.prediction.targets, rc.prediction.trainedModelPath);
 
@@ -331,8 +348,11 @@ export function loadConfig(): Config {
     lookbackMinutes: rc.prediction.lookbackMinutes,
     trainedModelPath: rc.prediction.trainedModelPath,
     minEdge: rc.prediction.minEdge,
-    baseBetUsd: rc.prediction.baseBetUsd,
-    maxBetUsd: rc.prediction.maxBetUsd,
+    baseBetUsd,
+    maxOrderNotionalUsd,
+    fixedOrderPrice,
+    cycleStartWindowSec,
+    maxBetUsd,
     minOrderShares,
     priceAggression: rc.prediction.priceAggression,
     minEntryPrice: Math.min(minEntryPrice, maxEntryPrice),
@@ -346,7 +366,6 @@ export function loadConfig(): Config {
     minMarketLiquidity: rc.marketFilter.minMarketLiquidity,
     minTimeToExpiryMin: rc.marketFilter.minTimeToExpiryMin,
     maxTimeToExpiryMin: rc.marketFilter.maxTimeToExpiryMin,
-    cooldownSeconds: rc.marketFilter.cooldownSeconds,
     minEntrySeconds,
     polyHost: rc.network.polyHost,
     gammaHost: rc.network.gammaHost,

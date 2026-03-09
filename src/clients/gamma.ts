@@ -181,7 +181,8 @@ export class GammaClient {
       if (isStrict) strictCandidates.push(candidate);
 
       const relaxedMax = Math.max(25, target.horizonMin * 3);
-      const isRelaxed = minsLeft <= relaxedMax;
+      const relaxedLiquidityFloor = Math.max(100, this.config.minMarketLiquidity * 0.5);
+      const isRelaxed = minsLeft <= relaxedMax && liquidity >= relaxedLiquidityFloor;
       if (isRelaxed) relaxedCandidates.push(candidate);
     }
 
@@ -377,7 +378,7 @@ export class GammaClient {
   private isAlignedWithCurrentWindowEnd(endMs: number, horizonMin: SupportedHorizon, nowMs: number): boolean {
     const intervalMs = horizonMin * 60_000;
     const expectedEndMs = Math.floor(nowMs / intervalMs) * intervalMs + intervalMs;
-    const toleranceMs = 90_000;
+    const toleranceMs = 15_000;
     return Math.abs(endMs - expectedEndMs) <= toleranceMs;
   }
 
