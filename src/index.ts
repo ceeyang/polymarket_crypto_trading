@@ -10,7 +10,7 @@ import { GammaClient } from "./clients/gamma.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
 import { makeDecision } from "./strategy/decision.js";
 import { loadTrainedModel, predictWithTrainedModel, type TrainedModelArtifact } from "./strategy/trained-model.js";
-import { readBotControlState, resolveBotControlMode, type BotControlMode } from "./services/bot-control.js";
+import { readBotControlState, resolveBotControlMode, type BotControlMode, writeBotControlState } from "./services/bot-control.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
 import { StateStore } from "./services/state-store.js";
 import { sleep } from "./utils.js";
@@ -938,7 +938,18 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
                   peakCollateralUsdc: Number(peak.toFixed(4)),
                   currentCollateralUsdc: Number(currentCollateralUsdc.toFixed(4)),
                 });
-                setTimeout(() => process.exit(22), 0);
+                if (controlMode === "WEB_CONTROLLED") {
+                  const control = readBotControlState();
+                  if (control.scanningEnabled) {
+                    writeBotControlState(false, "risk_max_drawdown");
+                  }
+                  log("risk action applied: web mode scan paused", {
+                    controlMode,
+                    scanningEnabled: false,
+                  });
+                } else {
+                  setTimeout(() => process.exit(22), 0);
+                }
               }
             })
             .catch((err) => {

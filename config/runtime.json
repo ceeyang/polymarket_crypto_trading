@@ -4,7 +4,7 @@
     "pollIntervalSec": 20,
     "autoClaim": true,
     "claimCooldownSec": 300,
-    "maxDrawdownPct": 50,
+    "maxDrawdownPct": 0,
     "maxOpenTrades": 10,
     "maxTradesPerDay": 120,
     "maxConsecutiveLosses": 0
@@ -23,19 +23,19 @@
         "coin": "BTC",
         "horizonMin": 5,
         "symbol": "BTCUSDT",
-        "modelPath": "state/models/btc_5m_d7_logreg.json"
+        "modelPath": "state/models/btc_5m_d21_logreg.json"
       },
       {
         "id": "ETH_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "ETH",
         "horizonMin": 5,
         "symbol": "ETHUSDT",
-        "modelPath": "state/models/eth_5m_d1_logreg.json"
+        "modelPath": "state/models/eth_5m_d21_logreg.json"
       },
       {
         "id": "SOL_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "SOL",
         "horizonMin": 5,
         "symbol": "SOLUSDT",
