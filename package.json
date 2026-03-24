@@ -1,5 +1,5 @@
 {
-  "name": "polymarket-eth-5m-bot",
+  "name": "polymarket-ai-15m-bot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,6 @@
     "web": "tsx src/web.ts",
     "balance": "tsx src/balance.ts",
     "claim": "tsx src/claim.ts",
-    "train:model": "tsx src/train-model.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js"
   },

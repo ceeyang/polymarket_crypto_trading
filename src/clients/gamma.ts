@@ -9,12 +9,11 @@ export class GammaClient {
 
   async getCandidateMarkets(limit = 500, now = new Date()): Promise<GammaMarket[]> {
     const defaultTarget: MarketTarget = {
-      id: "ETH_5m",
+      id: "ETH_15m",
       enabled: true,
       coin: "ETH",
-      horizonMin: 5,
+      horizonMin: 15,
       symbol: "ETHUSDT",
-      modelPath: this.config.trainedModelPath,
     };
     return this.getCandidateMarketsForTarget(defaultTarget, limit, now);
   }
@@ -74,12 +73,11 @@ export class GammaClient {
     excludedMarketIds?: Set<string>,
   ): SelectedMarket | null {
     const defaultTarget: MarketTarget = {
-      id: "ETH_5m",
+      id: "ETH_15m",
       enabled: true,
       coin: "ETH",
-      horizonMin: 5,
+      horizonMin: 15,
       symbol: "ETHUSDT",
-      modelPath: this.config.trainedModelPath,
     };
     return this.selectBestMarketForTarget(markets, defaultTarget, now, excludedMarketIds);
   }
@@ -293,7 +291,7 @@ export class GammaClient {
     const intervalSec = horizonMin * 60;
     const anchor = Math.ceil(nowSec / intervalSec) * intervalSec;
     const prefixes = this.slugPrefixesForCoin(coin);
-    const horizonTag = horizonMin === 60 ? "1h" : `${horizonMin}m`;
+    const horizonTag = `${horizonMin}m`;
     const slugs: string[] = [];
 
     for (let i = -2; i <= 6; i += 1) {
@@ -413,10 +411,9 @@ export class GammaClient {
 
   private hasHorizonHint(text: string, horizonMin: SupportedHorizon): boolean {
     const s = text.toLowerCase();
-    if (horizonMin === 5) return has5mHint(s);
     if (horizonMin === 15) {
       return ["15m", "15 min", "15-min", "15 minute", "15 minutes", "15分钟"].some((h) => s.includes(h));
     }
-    return ["1h", "1 hour", "60m", "60 min", "60-minute", "1小时"].some((h) => s.includes(h));
+    return has5mHint(s);
   }
 }

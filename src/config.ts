@@ -3,27 +3,15 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 
-export const MAX_TARGETS = 12;
+export const MAX_TARGETS = 4;
 export const SUPPORTED_COINS = ["BTC", "ETH", "SOL", "XRP"] as const;
-export const SUPPORTED_HORIZONS = [5, 15, 60] as const;
+export const SUPPORTED_HORIZONS = [15] as const;
 
 export type SupportedCoin = (typeof SUPPORTED_COINS)[number];
 export type SupportedHorizon = (typeof SUPPORTED_HORIZONS)[number];
-
-export interface TrainingConfig {
-  symbol: string;
-  start: string;
-  end: string;
-  horizonMin: number;
-  lookbackMin: number;
-  stepMin: number;
-  valDays: number;
-  epochs: number;
-  learningRate: number;
-  l2: number;
-  patience: number;
-  modelOut: string;
-}
+export type ProviderApiType = "openai_responses" | "openai_chat_compatible";
+export type ProviderResponseMode = "json_schema" | "json_object";
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
 
 export interface MarketTarget {
   id: string;
@@ -31,22 +19,21 @@ export interface MarketTarget {
   coin: SupportedCoin;
   horizonMin: SupportedHorizon;
   symbol: string;
-  modelPath?: string;
-  lookbackMinutes?: number;
-  minEdge?: number;
-  baseBetUsd?: number;
-  maxBetUsd?: number;
-  minOrderShares?: number;
-  priceAggression?: number;
-  trainStart?: string;
-  trainEnd?: string;
-  trainLookbackMin?: number;
-  trainStepMin?: number;
-  trainValDays?: number;
-  trainEpochs?: number;
-  trainLearningRate?: number;
-  trainL2?: number;
-  trainPatience?: number;
+}
+
+export interface ResolvedAiProviderConfig {
+  id: string;
+  label: string;
+  apiType: ProviderApiType;
+  model: string;
+  baseUrl: string;
+  apiKeyEnvVar: string;
+  apiKey: string;
+  reasoningEffort?: ReasoningEffort;
+  temperature: number;
+  maxOutputTokens: number;
+  timeoutMs: number;
+  responseMode: ProviderResponseMode;
 }
 
 export interface RuntimeConfigFile {
@@ -61,24 +48,13 @@ export interface RuntimeConfigFile {
     maxConsecutiveLosses?: number;
   };
   prediction: {
-    lookbackMinutes: number;
-    trainedModelPath: string;
-    minEdge: number;
-    baseBetUsd?: number;
+    horizonMin?: number;
+    factLookbackMinutes?: number;
+    minConfidence?: number;
     maxOrderNotionalUsd?: number;
     fixedOrderPrice?: number;
-    cycleStartWindowSec?: number;
-    maxBetUsd?: number;
-    minOrderShares?: number;
-    priceAggression: number;
-    minEntryPrice?: number;
-    maxEntryPrice?: number;
-    minOverround?: number;
-    maxOverround?: number;
-    enableReverseFallback?: boolean;
-    reverseMinEntrySeconds?: number;
-    reverseMinModelProb?: number;
-    reverseMinEdgeMultiplier?: number;
+    systemPrompt?: string;
+    userPromptTemplate?: string;
     targets?: Partial<MarketTarget>[];
   };
   marketFilter: {
@@ -100,7 +76,6 @@ export interface RuntimeConfigFile {
     usdcAddress: string;
     ctfAddress: string;
   };
-  training: TrainingConfig;
 }
 
 export interface Config {
@@ -112,24 +87,13 @@ export interface Config {
   maxOpenTrades: number;
   maxTradesPerDay: number;
   maxConsecutiveLosses: number;
-  lookbackMinutes: number;
-  trainedModelPath: string;
-  minEdge: number;
-  baseBetUsd: number;
+  horizonMin: SupportedHorizon;
+  factLookbackMinutes: number;
+  minConfidence: number;
   maxOrderNotionalUsd: number;
   fixedOrderPrice: number;
-  cycleStartWindowSec: number;
-  maxBetUsd: number;
-  minOrderShares: number;
-  priceAggression: number;
-  minEntryPrice: number;
-  maxEntryPrice: number;
-  minOverround: number;
-  maxOverround: number;
-  enableReverseFallback: boolean;
-  reverseMinEntrySeconds: number;
-  reverseMinModelProb: number;
-  reverseMinEdgeMultiplier: number;
+  systemPrompt: string;
+  userPromptTemplate: string;
   minMarketLiquidity: number;
   minTimeToExpiryMin: number;
   maxTimeToExpiryMin: number;
@@ -146,6 +110,7 @@ export interface Config {
   usdcAddress: string;
   ctfAddress: string;
   targets: MarketTarget[];
+  provider: ResolvedAiProviderConfig;
   privateKey: string;
   funderAddress?: string;
   apiKey?: string;
@@ -154,20 +119,33 @@ export interface Config {
   builderApiKey?: string;
   builderSecret?: string;
   builderPassphrase?: string;
-  training: TrainingConfig;
 }
 
 const RUNTIME_CONFIG_PATH = path.resolve("config", "runtime.json");
 
-export function getTargetId(coin: SupportedCoin, horizonMin: SupportedHorizon): string {
-  const tag = horizonMin === 60 ? "1h" : `${horizonMin}m`;
-  return `${coin}_${tag}`;
-}
+export const DEFAULT_SYSTEM_PROMPT = [
+  "你是一个短周期市场事实分析器。",
+  "你只能依据提供给你的事实包做判断，不允许补充未提供的新闻、链上事件或主观猜测。",
+  "你的任务是预测未来 15 分钟标的方向，并输出结构化 JSON。",
+  "除非输入字段明显缺失、无法解析，或者市场事实明显损坏，否则你必须给出 UP 或 DOWN。",
+  "即使优势很弱，也要输出最可能方向，并把 confidence 调低。",
+  "tradeable 只表示是否值得执行交易，不影响 direction 的输出。",
+  "不要仅仅因为信号混合、波动小或可能已部分定价，就默认输出 ABSTAIN。",
+].join("\n");
 
-export function getDefaultModelPathForTarget(coin: SupportedCoin, horizonMin: SupportedHorizon): string {
-  const h = horizonMin === 60 ? "1h" : `${horizonMin}m`;
-  return `state/models/${coin.toLowerCase()}_${h}_logreg.json`;
-}
+export const DEFAULT_USER_PROMPT_TEMPLATE = [
+  "请基于下面的事实包，判断 {{coin}} 在未来 {{horizonMin}} 分钟的方向。",
+  "你面对的是 Polymarket 的 Up/Down 市场，YES 表示 UP，NO 表示 DOWN。",
+  "事实包如下：",
+  "{{factsJson}}",
+  "",
+  "输出要求：",
+  "1. direction 只能是 UP / DOWN / ABSTAIN；只有输入损坏或无法判断时才允许 ABSTAIN",
+  "2. probUp 与 confidence 都必须在 0 到 1 之间",
+  "3. 即使 tradeable=false，也必须给出最可能方向",
+  "4. reasons 与 risks 要尽量简洁，聚焦事实，不要写空话",
+  "5. 若 direction=ABSTAIN，则 tradeable 必须为 false",
+].join("\n");
 
 function parseSignatureType(raw: string | undefined, fallback: number): number {
   const n = Number(raw);
@@ -193,16 +171,22 @@ function parsePositiveNumber(raw: unknown, fallback: number): number {
   return n;
 }
 
+function parseNonNegativeNumber(raw: unknown, fallback: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return n;
+}
+
+function clampNumber(raw: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
 function normalizeFixedOrderPrice(raw: unknown, fallback: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return fallback;
   if (n > 1 && n <= 100) return n / 100;
-  return n;
-}
-
-function parseNonNegativeNumber(raw: unknown, fallback: number): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return fallback;
   return n;
 }
 
@@ -225,61 +209,123 @@ function normalizeHorizon(raw: unknown, fallback: SupportedHorizon): SupportedHo
   return fallback;
 }
 
-function buildDefaultTargets(defaultModelPath: string): MarketTarget[] {
-  const targets: MarketTarget[] = [];
-  for (const coin of SUPPORTED_COINS) {
-    for (const horizonMin of SUPPORTED_HORIZONS) {
-      const enabled = horizonMin === 5 && (coin === "BTC" || coin === "ETH");
-      targets.push({
-        id: getTargetId(coin, horizonMin),
-        enabled,
-        coin,
-        horizonMin,
-        symbol: `${coin}USDT`,
-        modelPath: getDefaultModelPathForTarget(coin, horizonMin) || defaultModelPath,
-      });
-    }
+function normalizeProviderApiType(raw: unknown): ProviderApiType {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "openai_chat_compatible" || v === "chat" || v === "openai-compatible") {
+    return "openai_chat_compatible";
   }
-  return targets;
+  return "openai_responses";
 }
 
-function normalizeTargets(rawTargets: Partial<MarketTarget>[] | undefined, defaultModelPath: string): MarketTarget[] {
-  const defaults = buildDefaultTargets(defaultModelPath);
+function normalizeResponseMode(raw: unknown): ProviderResponseMode {
+  const v = String(raw ?? "").trim().toLowerCase();
+  return v === "json_object" ? "json_object" : "json_schema";
+}
+
+function normalizeReasoningEffort(raw: unknown): ReasoningEffort | undefined {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "minimal" || v === "low" || v === "medium" || v === "high") {
+    return v;
+  }
+  return undefined;
+}
+
+export function getTargetId(coin: SupportedCoin, horizonMin: SupportedHorizon): string {
+  return `${coin}_${horizonMin}m`;
+}
+
+function buildDefaultTargets(): MarketTarget[] {
+  return SUPPORTED_COINS.map((coin, idx) => ({
+    id: getTargetId(coin, 15),
+    enabled: idx === 0,
+    coin,
+    horizonMin: 15,
+    symbol: `${coin}USDT`,
+  }));
+}
+
+function normalizeTargets(rawTargets: Partial<MarketTarget>[] | undefined): MarketTarget[] {
+  const defaults = buildDefaultTargets();
   if (!Array.isArray(rawTargets) || rawTargets.length === 0) return defaults;
 
   const out: MarketTarget[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i < rawTargets.length && out.length < MAX_TARGETS; i += 1) {
     const t = rawTargets[i] ?? {};
     const coin = normalizeCoin(t.coin, "BTC");
-    const horizonMin = normalizeHorizon(t.horizonMin, 5);
+    const horizonMin = normalizeHorizon(t.horizonMin, 15);
+    const id = typeof t.id === "string" && t.id.trim() ? t.id.trim() : getTargetId(coin, horizonMin);
+    if (seen.has(id)) continue;
+    seen.add(id);
     out.push({
-      id: typeof t.id === "string" && t.id.trim() ? t.id.trim() : getTargetId(coin, horizonMin),
+      id,
       enabled: Boolean(t.enabled),
       coin,
       horizonMin,
       symbol: typeof t.symbol === "string" && t.symbol.trim() ? t.symbol.trim().toUpperCase() : `${coin}USDT`,
-      modelPath: typeof t.modelPath === "string" && t.modelPath.trim()
-        ? t.modelPath.trim()
-        : getDefaultModelPathForTarget(coin, horizonMin) || defaultModelPath,
-      lookbackMinutes: t.lookbackMinutes == null ? undefined : parsePositiveInt(t.lookbackMinutes, 120),
-      minEdge: t.minEdge == null ? undefined : parsePositiveNumber(t.minEdge, 0.02),
-      baseBetUsd: t.baseBetUsd == null ? undefined : parsePositiveNumber(t.baseBetUsd, 2.5),
-      maxBetUsd: t.maxBetUsd == null ? undefined : parsePositiveNumber(t.maxBetUsd, 2.5),
-      minOrderShares: t.minOrderShares == null ? undefined : parsePositiveNumber(t.minOrderShares, 5),
-      priceAggression: t.priceAggression == null ? undefined : parsePositiveNumber(t.priceAggression, 0.01),
-      trainStart: typeof t.trainStart === "string" && t.trainStart.trim() ? t.trainStart.trim() : undefined,
-      trainEnd: typeof t.trainEnd === "string" && t.trainEnd.trim() ? t.trainEnd.trim() : undefined,
-      trainLookbackMin: t.trainLookbackMin == null ? undefined : parsePositiveInt(t.trainLookbackMin, 120),
-      trainStepMin: t.trainStepMin == null ? undefined : parsePositiveInt(t.trainStepMin, 1),
-      trainValDays: t.trainValDays == null ? undefined : parsePositiveInt(t.trainValDays, 3),
-      trainEpochs: t.trainEpochs == null ? undefined : parsePositiveInt(t.trainEpochs, 400),
-      trainLearningRate: t.trainLearningRate == null ? undefined : parsePositiveNumber(t.trainLearningRate, 0.05),
-      trainL2: t.trainL2 == null ? undefined : parseNonNegativeNumber(t.trainL2, 0.001),
-      trainPatience: t.trainPatience == null ? undefined : parsePositiveInt(t.trainPatience, 40),
     });
   }
 
   return out.length > 0 ? out : defaults;
+}
+
+function parseEnvBool(raw: string | undefined, fallback: boolean): boolean {
+  if (raw == null || raw.trim() === "") return fallback;
+  const value = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  return fallback;
+}
+
+function buildResolvedProvider(input: {
+  id?: string;
+  label?: string;
+  apiType?: unknown;
+  model?: string;
+  baseUrl?: string;
+  apiKeyEnvVar: string;
+  apiKey?: string;
+  reasoningEffort?: unknown;
+  temperature?: unknown;
+  maxOutputTokens?: unknown;
+  timeoutMs?: unknown;
+  responseMode?: unknown;
+}): ResolvedAiProviderConfig {
+  const apiType = normalizeProviderApiType(input.apiType);
+  const model = String(input.model || "").trim();
+  const apiKey = String(input.apiKey || "").trim();
+  const baseUrl = String(input.baseUrl || (apiType === "openai_responses" ? "https://api.openai.com/v1" : "")).trim();
+  return {
+    id: String(input.id || "ai_primary").trim() || "ai_primary",
+    label: String(input.label || input.id || "AI Primary").trim() || "AI Primary",
+    apiType,
+    model,
+    baseUrl,
+    apiKeyEnvVar: input.apiKeyEnvVar,
+    apiKey,
+    reasoningEffort: normalizeReasoningEffort(input.reasoningEffort),
+    temperature: clampNumber(input.temperature, 0, 2, 0.2),
+    maxOutputTokens: parsePositiveInt(input.maxOutputTokens, 600),
+    timeoutMs: parsePositiveInt(input.timeoutMs, 30000),
+    responseMode: normalizeResponseMode(input.responseMode),
+  };
+}
+
+function buildProviderFromEnv(): ResolvedAiProviderConfig {
+  return buildResolvedProvider({
+    id: process.env.AI_ID || "deepseek_primary",
+    label: process.env.AI_LABEL || "DeepSeek Primary",
+    apiType: process.env.AI_API_TYPE || "openai_chat_compatible",
+    model: process.env.AI_MODEL || "deepseek-chat",
+    baseUrl: process.env.AI_BASE_URL || "https://api.deepseek.com",
+    apiKeyEnvVar: "AI_API_KEY",
+    apiKey: process.env.AI_API_KEY,
+    reasoningEffort: process.env.AI_REASONING_EFFORT,
+    temperature: process.env.AI_TEMPERATURE,
+    maxOutputTokens: process.env.AI_MAX_OUTPUT_TOKENS,
+    timeoutMs: process.env.AI_TIMEOUT_MS,
+    responseMode: process.env.AI_RESPONSE_MODE || "json_object",
+  });
 }
 
 export function readRuntimeConfig(): RuntimeConfigFile {
@@ -311,62 +357,30 @@ export function loadConfig(): Config {
   const relayerTxType = relayerTxTypeFromEnv
     ?? relayerTxTypeFromRuntime
     ?? (signatureType === 2 ? "SAFE" : "PROXY");
-  const autoClaim = rc.runtime.autoClaim ?? true;
-  const claimCooldownSec = parsePositiveInt(rc.runtime.claimCooldownSec, 300);
-  const maxDrawdownPct = parseNonNegativeNumber(rc.runtime.maxDrawdownPct, 0);
-  const maxOpenTrades = parseNonNegativeInt(rc.runtime.maxOpenTrades, 6);
-  const maxTradesPerDay = parseNonNegativeInt(rc.runtime.maxTradesPerDay, 120);
-  const maxConsecutiveLosses = parseNonNegativeInt(rc.runtime.maxConsecutiveLosses, 4);
-  const maxOrderNotionalUsd = parsePositiveNumber(rc.prediction.maxOrderNotionalUsd, 2.5);
-  const baseBetUsd = parsePositiveNumber(rc.prediction.baseBetUsd, maxOrderNotionalUsd);
+
   const fixedOrderPriceRaw = normalizeFixedOrderPrice(rc.prediction.fixedOrderPrice, 0.45);
   const fixedOrderPrice = Math.max(0.01, Math.min(0.99, fixedOrderPriceRaw));
-  const cycleStartWindowSec = parsePositiveInt(rc.prediction.cycleStartWindowSec, 60);
-  const maxBetUsd = parsePositiveNumber(rc.prediction.maxBetUsd, Math.max(baseBetUsd, maxOrderNotionalUsd));
-  const minOrderShares = parsePositiveNumber(rc.prediction.minOrderShares, 5);
-  const minEntryPrice = parsePositiveNumber(rc.prediction.minEntryPrice, 0.05);
-  const maxEntryPrice = parsePositiveNumber(rc.prediction.maxEntryPrice, 0.90);
-  const minOverround = parsePositiveNumber(rc.prediction.minOverround, 0.95);
-  const maxOverround = parsePositiveNumber(rc.prediction.maxOverround, 1.06);
-  // Reverse fallback is fully disabled by design.
-  const enableReverseFallback = false;
-  const reverseMinEntrySeconds = 90;
-  const reverseMinModelProb = 0.42;
-  const reverseMinEdgeMultiplier = 1.3;
-  const minEntrySeconds = parsePositiveInt(rc.marketFilter.minEntrySeconds, 45);
-  const targets = normalizeTargets(rc.prediction.targets, rc.prediction.trainedModelPath);
 
   return {
-    dryRun: rc.runtime.dryRun,
-    pollIntervalSec: rc.runtime.pollIntervalSec,
-    autoClaim,
-    claimCooldownSec,
-    maxDrawdownPct,
-    maxOpenTrades,
-    maxTradesPerDay,
-    maxConsecutiveLosses,
-    lookbackMinutes: rc.prediction.lookbackMinutes,
-    trainedModelPath: rc.prediction.trainedModelPath,
-    minEdge: rc.prediction.minEdge,
-    baseBetUsd,
-    maxOrderNotionalUsd,
+    dryRun: rc.runtime.dryRun !== false,
+    pollIntervalSec: parsePositiveInt(rc.runtime.pollIntervalSec, 20),
+    autoClaim: rc.runtime.autoClaim ?? false,
+    claimCooldownSec: parsePositiveInt(rc.runtime.claimCooldownSec, 300),
+    maxDrawdownPct: parseNonNegativeNumber(rc.runtime.maxDrawdownPct, 0),
+    maxOpenTrades: parseNonNegativeInt(rc.runtime.maxOpenTrades, 6),
+    maxTradesPerDay: parseNonNegativeInt(rc.runtime.maxTradesPerDay, 120),
+    maxConsecutiveLosses: parseNonNegativeInt(rc.runtime.maxConsecutiveLosses, 4),
+    horizonMin: normalizeHorizon(rc.prediction.horizonMin, 15),
+    factLookbackMinutes: parsePositiveInt(rc.prediction.factLookbackMinutes, 90),
+    minConfidence: clampNumber(rc.prediction.minConfidence, 0, 1, 0.55),
+    maxOrderNotionalUsd: parsePositiveNumber(rc.prediction.maxOrderNotionalUsd, 2.5),
     fixedOrderPrice,
-    cycleStartWindowSec,
-    maxBetUsd,
-    minOrderShares,
-    priceAggression: rc.prediction.priceAggression,
-    minEntryPrice: Math.min(minEntryPrice, maxEntryPrice),
-    maxEntryPrice: Math.max(minEntryPrice, maxEntryPrice),
-    minOverround: Math.min(minOverround, maxOverround),
-    maxOverround: Math.max(minOverround, maxOverround),
-    enableReverseFallback,
-    reverseMinEntrySeconds,
-    reverseMinModelProb,
-    reverseMinEdgeMultiplier,
-    minMarketLiquidity: rc.marketFilter.minMarketLiquidity,
-    minTimeToExpiryMin: rc.marketFilter.minTimeToExpiryMin,
-    maxTimeToExpiryMin: rc.marketFilter.maxTimeToExpiryMin,
-    minEntrySeconds,
+    systemPrompt: String(rc.prediction.systemPrompt || DEFAULT_SYSTEM_PROMPT).trim() || DEFAULT_SYSTEM_PROMPT,
+    userPromptTemplate: String(rc.prediction.userPromptTemplate || DEFAULT_USER_PROMPT_TEMPLATE).trim() || DEFAULT_USER_PROMPT_TEMPLATE,
+    minMarketLiquidity: parseNonNegativeNumber(rc.marketFilter.minMarketLiquidity, 300),
+    minTimeToExpiryMin: parsePositiveNumber(rc.marketFilter.minTimeToExpiryMin, 5),
+    maxTimeToExpiryMin: parsePositiveNumber(rc.marketFilter.maxTimeToExpiryMin, 20),
+    minEntrySeconds: parsePositiveInt(rc.marketFilter.minEntrySeconds, 45),
     polyHost: rc.network.polyHost,
     gammaHost: rc.network.gammaHost,
     dataApiHost: rc.network.dataApiHost,
@@ -378,7 +392,8 @@ export function loadConfig(): Config {
     signatureType,
     usdcAddress: rc.network.usdcAddress,
     ctfAddress: rc.network.ctfAddress,
-    targets,
+    targets: normalizeTargets(rc.prediction.targets),
+    provider: buildProviderFromEnv(),
     privateKey: process.env.PRIVATE_KEY ?? "",
     funderAddress: process.env.FUNDER_ADDRESS,
     apiKey: process.env.POLY_API_KEY,
@@ -387,6 +402,5 @@ export function loadConfig(): Config {
     builderApiKey: process.env.POLY_BUILDER_API_KEY ?? process.env.BUILDER_API_KEY,
     builderSecret: process.env.POLY_BUILDER_SECRET ?? process.env.BUILDER_SECRET,
     builderPassphrase: process.env.POLY_BUILDER_PASSPHRASE ?? process.env.BUILDER_PASSPHRASE ?? process.env.BUILDER_PASS_PHRASE,
-    training: rc.training,
   };
 }

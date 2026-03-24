@@ -5,6 +5,16 @@ export interface BinanceClosePoint {
   close: number;
 }
 
+export interface BinanceCandle {
+  openTime: number;
+  closeTime: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 function intervalToMs(interval: string): number {
   const v = String(interval || "").trim().toLowerCase();
   if (v === "1m") return 60_000;
@@ -20,6 +30,11 @@ export class BinanceClient {
   constructor(private readonly baseUrl = "https://api.binance.com") {}
 
   async getCloses(symbol: string, interval = "1m", limit = 150): Promise<number[]> {
+    const candles = await this.getRecentCandles(symbol, interval, limit);
+    return candles.map((row) => row.close).filter((n) => Number.isFinite(n));
+  }
+
+  async getRecentCandles(symbol: string, interval = "1m", limit = 150): Promise<BinanceCandle[]> {
     const { data } = await axios.get(`${this.baseUrl}/api/v3/klines`, {
       params: { symbol, interval, limit },
       timeout: 12000,
@@ -29,7 +44,25 @@ export class BinanceClient {
       throw new Error("Invalid Binance klines response");
     }
 
-    return data.map((row: unknown[]) => Number(row[4])).filter((n: number) => Number.isFinite(n));
+    return data
+      .map((row: unknown[]) => ({
+        openTime: Number(row[0]),
+        closeTime: Number(row[6]),
+        open: Number(row[1]),
+        high: Number(row[2]),
+        low: Number(row[3]),
+        close: Number(row[4]),
+        volume: Number(row[5]),
+      }))
+      .filter((row: BinanceCandle) => (
+        Number.isFinite(row.openTime)
+        && Number.isFinite(row.closeTime)
+        && Number.isFinite(row.open)
+        && Number.isFinite(row.high)
+        && Number.isFinite(row.low)
+        && Number.isFinite(row.close)
+        && Number.isFinite(row.volume)
+      ));
   }
 
   async getCloseNearTime(symbol: string, targetMs: number): Promise<number | null> {

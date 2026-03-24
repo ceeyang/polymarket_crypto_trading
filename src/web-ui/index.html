@@ -3,1439 +3,763 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Polymarket Bot Dashboard</title>
+    <title>Polymarket AI Dashboard</title>
     <style>
-      @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
+      @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap");
 
       :root {
-        --bg-0: #f4f8f4;
+        --bg-0: #f5f7f2;
         --bg-1: #eef5ff;
-        --bg-2: #f9fcff;
-        --card: rgba(255, 255, 255, 0.88);
-        --card-strong: #ffffff;
-        --text: #0f1c2f;
-        --muted: #58677f;
-        --border: #d4dde9;
+        --bg-2: #fbfcff;
+        --card: rgba(255, 255, 255, 0.92);
+        --text: #102033;
+        --muted: #5f6f86;
+        --border: #d5dfea;
         --primary: #0f766e;
         --primary-2: #1d4ed8;
         --danger: #b42318;
         --success: #067647;
         --warn: #b54708;
-        --shadow: 0 8px 30px rgba(15, 28, 47, 0.08);
+        --shadow: 0 10px 32px rgba(16, 32, 51, 0.08);
       }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
-        background:
-          radial-gradient(circle at 0% 0%, rgba(29, 78, 216, 0.08), transparent 42%),
-          radial-gradient(circle at 100% 0%, rgba(15, 118, 110, 0.08), transparent 38%),
-          linear-gradient(165deg, var(--bg-0) 0%, var(--bg-1) 48%, var(--bg-2) 100%);
         color: var(--text);
         font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
-        line-height: 1.5;
+        background:
+          radial-gradient(circle at 0% 0%, rgba(29, 78, 216, 0.08), transparent 38%),
+          radial-gradient(circle at 100% 0%, rgba(15, 118, 110, 0.08), transparent 32%),
+          linear-gradient(160deg, var(--bg-0) 0%, var(--bg-1) 48%, var(--bg-2) 100%);
       }
+
       .wrap {
-        max-width: 1360px;
-        margin: 24px auto 32px;
+        max-width: 1440px;
+        margin: 24px auto 40px;
         padding: 0 16px;
-        box-sizing: border-box;
       }
-      .grid {
-        display: block;
-      }
+
       .card {
         background: var(--card);
-        backdrop-filter: blur(8px);
         border: 1px solid var(--border);
         border-radius: 18px;
-        padding: 16px;
-        width: 100%;
-        box-sizing: border-box;
-        overflow: hidden;
         box-shadow: var(--shadow);
-        animation: rise 220ms ease-out both;
+        backdrop-filter: blur(8px);
       }
-      .card:nth-child(2) {
-        animation-delay: 60ms;
+
+      .hero {
+        padding: 18px;
+        margin-bottom: 14px;
       }
-      .card:nth-child(3) {
-        animation-delay: 110ms;
-      }
-      @keyframes rise {
-        from {
-          opacity: 0;
-          transform: translateY(10px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-      h1,
-      h2 {
+
+      h1, h2 {
         font-family: "Space Grotesk", "Plus Jakarta Sans", sans-serif;
-        letter-spacing: 0.01em;
-      }
-      h1 {
         margin: 0;
-        font-size: 30px;
-        line-height: 1.15;
       }
+
+      h1 {
+        font-size: 30px;
+        line-height: 1.1;
+      }
+
       h2 {
-        margin: 0 0 8px;
         font-size: 18px;
       }
-      code {
-        background: #ecf2ff;
-        border: 1px solid #dce7ff;
-        border-radius: 6px;
-        padding: 1px 6px;
-        font-size: 12px;
-      }
+
       .muted {
         color: var(--muted);
         font-size: 13px;
       }
-      .hero {
+
+      .hero-top, .scan-control, .toolbar, .row {
         display: flex;
+        gap: 12px;
+        align-items: center;
         justify-content: space-between;
-        align-items: flex-end;
-        gap: 14px;
+        flex-wrap: wrap;
+      }
+
+      .hero-top {
         margin-bottom: 12px;
       }
-      .hero-meta {
-        flex: 1;
-        min-width: 240px;
-      }
+
       .pill {
         display: inline-flex;
         align-items: center;
-        border: 1px solid #ced8ea;
-        background: #f7fbff;
-        border-radius: 999px;
-        padding: 6px 12px;
-        font-size: 12px;
-        color: #325271;
         gap: 8px;
+        padding: 7px 12px;
+        border-radius: 999px;
+        border: 1px solid #d0dbeb;
+        background: #f7fbff;
+        font-size: 12px;
+        color: #315170;
       }
+
       .scan-control {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 12px;
-        margin: 8px 0 12px;
-        padding: 12px 14px;
-        border: 1px solid #d4dde9;
+        padding: 14px;
+        border: 1px solid var(--border);
         border-radius: 14px;
-        background: rgba(255, 255, 255, 0.92);
+        background: rgba(255, 255, 255, 0.95);
       }
+
       .scan-info {
         display: flex;
         align-items: center;
         gap: 10px;
-        min-width: 260px;
       }
+
       .scan-dot {
         width: 10px;
         height: 10px;
-        border-radius: 999px;
-        background: #b42318;
+        border-radius: 50%;
+        background: var(--danger);
         box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.12);
       }
+
       .scan-dot.on {
-        background: #067647;
+        background: var(--success);
         box-shadow: 0 0 0 4px rgba(6, 118, 71, 0.14);
       }
-      .scan-title {
-        font-weight: 700;
-      }
-      .scan-actions {
+
+      .tabs {
         display: flex;
-        align-items: center;
         gap: 8px;
-      }
-      #scanToggleBtn {
-        min-width: 152px;
-        font-size: 14px;
-      }
-      #scanToggleBtn.scan-on {
-        background: linear-gradient(90deg, #067647, #0f766e);
-      }
-      #scanToggleBtn.scan-off {
-        background: linear-gradient(90deg, #b42318, #b54708);
-      }
-      #scanRefreshBtn {
-        background: #ffffff;
-        border-color: #ccd8eb;
-        color: #355173;
-      }
-      .row {
-        display: flex;
-        align-items: center;
-        gap: 10px;
+        margin-bottom: 14px;
         flex-wrap: wrap;
       }
-      .form-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(195px, 1fr));
-        gap: 11px;
-        margin: 12px 0;
+
+      .tab-btn {
+        border: 1px solid #cfdbeb;
+        background: rgba(255, 255, 255, 0.88);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 10px 14px;
+        cursor: pointer;
       }
-      .field {
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 9px 10px;
-        background: #f8fbff;
+
+      .tab-btn.active {
+        background: linear-gradient(90deg, var(--primary), var(--primary-2));
+        color: #fff;
+        border-color: transparent;
       }
-      .field label {
+
+      .panel {
+        display: none;
+        padding: 16px;
+      }
+
+      .panel.active {
         display: block;
+      }
+
+      .grid-2, .grid-3 {
+        display: grid;
+        gap: 12px;
+      }
+
+      .grid-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .section {
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.94);
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .field label {
         font-size: 12px;
         color: var(--muted);
-        margin-bottom: 4px;
       }
-      .field input[type="number"],
-      .field input[type="text"] {
+
+      input[type="text"],
+      input[type="number"],
+      select,
+      textarea {
         width: 100%;
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 9px 10px;
-        font-size: 13px;
-        box-sizing: border-box;
+        border-radius: 10px;
+        padding: 10px 11px;
+        font: inherit;
         background: #fff;
+        color: var(--text);
       }
-      .field input:focus,
-      .select:focus,
-      button:focus-visible,
-      .target-item input:focus-visible {
-        outline: 2px solid #7fb5ff;
+
+      textarea {
+        min-height: 150px;
+        resize: vertical;
+        line-height: 1.45;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus,
+      button:focus-visible {
+        outline: 2px solid #8dbdff;
         outline-offset: 1px;
       }
+
       .toggle {
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 8px;
-        font-size: 13px;
-        background: #f7fbff;
-        border: 1px solid #d6e0ef;
+        padding: 7px 12px;
         border-radius: 999px;
-        padding: 6px 12px;
+        border: 1px solid #d5dfeb;
+        background: #f8fbff;
       }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-        table-layout: auto;
-      }
-      th,
-      td {
-        border-bottom: 1px solid #e7edf7;
-        text-align: left;
-        padding: 9px 8px;
-      }
-      th {
-        color: #526178;
-        font-weight: 600;
-        font-size: 12px;
-      }
+
       button {
         border: 1px solid transparent;
         border-radius: 10px;
         background: linear-gradient(90deg, var(--primary), var(--primary-2));
         color: #fff;
-        padding: 10px 13px;
+        padding: 10px 14px;
         font-weight: 600;
-        min-height: 40px;
         cursor: pointer;
-        transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
       }
-      button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 6px 20px rgba(15, 118, 110, 0.24);
-      }
-      button:active {
-        transform: translateY(0);
-      }
-      button:disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
-        box-shadow: none;
-      }
-      #loadBtn,
-      #refreshLogBtn,
-      #refreshTradesBtn,
-      #refreshBalanceBtn,
-      #claimBalanceBtn,
-      #tradePrevBtn,
-      #tradeNextBtn {
-        background: #ffffff;
-        border-color: #ccd8eb;
+
+      button.secondary {
+        background: #fff;
         color: #355173;
+        border-color: #ccd8eb;
       }
-      #clearLogBtn,
-      #clearTradesBtn {
-        background: #fff5f5;
-        border-color: #f1caca;
-        color: var(--danger);
+
+      button.danger {
+        background: linear-gradient(90deg, #b42318, #b54708);
       }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        padding: 10px 8px;
+        border-bottom: 1px solid #e7eef7;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: #516178;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .stat {
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.95);
+      }
+
+      .stat strong {
+        display: block;
+        font-size: 20px;
+        margin-top: 4px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        border: 1px solid transparent;
+      }
+
+      .win { background: rgba(6, 118, 71, 0.12); color: var(--success); }
+      .lose { background: rgba(180, 35, 24, 0.12); color: var(--danger); }
+      .pending { background: rgba(29, 78, 216, 0.12); color: #1d4ed8; }
+      .canceled { background: rgba(181, 71, 8, 0.12); color: var(--warn); }
+      .mode-live { background: rgba(180, 35, 24, 0.12); color: var(--danger); }
+      .mode-dry { background: rgba(6, 118, 71, 0.12); color: var(--success); }
+      .dir-up { background: rgba(6, 118, 71, 0.12); color: var(--success); }
+      .dir-down { background: rgba(180, 35, 24, 0.12); color: var(--danger); }
+      .dir-abstain { background: rgba(181, 71, 8, 0.12); color: var(--warn); }
+
       pre {
         margin: 0;
-        border: 1px solid #dbe5f4;
-        border-radius: 12px;
-        padding: 12px;
-        height: min(48vh, 580px);
-        width: 100%;
-        max-width: 100%;
-        box-sizing: border-box;
+        padding: 14px;
+        border-radius: 14px;
+        background: #0d1726;
+        color: #e8f1ff;
         overflow: auto;
-        background: #f4f8ff;
-        font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+        min-height: 320px;
         font-size: 12px;
-        white-space: pre-wrap;
-        word-break: break-word;
       }
-      .table-wrap {
-        width: 100%;
-        max-width: 100%;
-        overflow-x: auto;
-      }
-      .targets-compact {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(260px, 1fr));
-        gap: 8px 12px;
-        margin-top: 8px;
-      }
-      .target-item {
+
+      .provider-actions,
+      .table-actions {
         display: flex;
-        align-items: center;
         gap: 8px;
-        border: 1px solid #d8e2f1;
-        border-radius: 10px;
-        padding: 8px 10px;
-        background: #fbfdff;
-        font-size: 13px;
-      }
-      .target-item.target-row {
-        display: grid;
-        grid-template-columns: minmax(120px, 1fr) minmax(150px, 1fr);
-      }
-      .target-main {
-        display: flex;
         align-items: center;
-        gap: 8px;
-        min-width: 0;
-      }
-      .target-model {
-        min-width: 140px;
-      }
-      .log-wrap {
-        width: 100%;
-        max-width: 100%;
-        overflow-x: auto;
-      }
-      .log-card {
-        grid-column: 1 / -1;
-      }
-      .tabbar {
-        display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        margin: 6px 0 14px;
       }
-      .tab-btn {
-        min-height: 40px;
-        border-radius: 999px;
-        padding: 8px 14px;
-        border: 1px solid #cad6ea;
-        background: #ffffff;
-        color: #2e4b6e;
-        font-weight: 700;
-        font-size: 13px;
+
+      .provider-table input,
+      .provider-table select {
+        min-width: 88px;
       }
-      .tab-btn.active {
-        color: #fff;
-        border-color: transparent;
-        background: linear-gradient(90deg, var(--primary), var(--primary-2));
-      }
-      .module-panel {
-        display: none;
-      }
-      .module-panel.active {
-        display: block;
-      }
-      .module-panel + .module-panel {
-        margin-top: 14px;
-      }
-      .placeholder {
-        border: 1px dashed #b8c7de;
-        border-radius: 12px;
-        padding: 18px;
-        background: #f8fbff;
-      }
-      .chip {
-        display: inline-block;
-        font-size: 12px;
-        color: #0f172a;
-        padding: 2px 8px;
-        border-radius: 999px;
-        border: 1px solid #d6deed;
-        background: #f2f7ff;
-      }
-      .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(6, minmax(120px, 1fr));
-        gap: 10px;
-        margin: 10px 0 12px;
-      }
-      .stat {
-        border: 1px solid #d8e2f2;
-        border-radius: 12px;
-        padding: 10px;
-        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-      }
-      .stat .label {
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .stat .value {
-        margin-top: 3px;
-        font-weight: 700;
-        font-size: 18px;
-      }
-      .badge {
-        display: inline-block;
-        border-radius: 999px;
-        padding: 3px 8px;
-        font-size: 12px;
-        font-weight: 600;
-      }
-      .badge.win {
-        color: var(--success);
-        background: #d9fbe8;
-      }
-      .badge.lose {
-        color: var(--danger);
-        background: #fee4e2;
-      }
-      .badge.pending {
-        color: var(--warn);
-        background: #ffefc6;
-      }
-      .badge.canceled {
-        color: #475467;
-        background: #eaecf0;
-      }
-      .badge.mode-live {
-        color: #1d4ed8;
-        background: #dbeafe;
-      }
-      .badge.mode-dry {
-        color: #5b21b6;
-        background: #ede9fe;
-      }
+
       .market-link {
         color: #1d4ed8;
         text-decoration: none;
-        border-bottom: 1px dashed rgba(29, 78, 216, 0.45);
       }
+
       .market-link:hover {
-        color: #1e40af;
-        border-bottom-color: rgba(30, 64, 175, 0.8);
+        text-decoration: underline;
       }
-      .select {
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 8px 10px;
-        background: #fff;
+
+      .meta-details {
+        min-width: 260px;
       }
-      @media (max-width: 1050px) {
-        .form-grid {
-          grid-template-columns: 1fr 1fr;
-        }
-        .targets-compact {
+
+      .meta-details summary {
+        cursor: pointer;
+        color: #1d4ed8;
+        user-select: none;
+      }
+
+      .meta-details summary:hover {
+        text-decoration: underline;
+      }
+
+      .meta-pre {
+        margin-top: 8px;
+        min-height: 0;
+        max-height: 280px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: #0d1726;
+        color: #e8f1ff;
+        overflow: auto;
+        font-size: 11px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      @media (max-width: 1100px) {
+        .grid-2, .grid-3, .stats {
           grid-template-columns: 1fr;
-        }
-        .stats-grid {
-          grid-template-columns: repeat(3, minmax(120px, 1fr));
-        }
-      }
-      @media (max-width: 640px) {
-        .hero {
-          flex-direction: column;
-          align-items: flex-start;
-        }
-        .form-grid {
-          grid-template-columns: 1fr;
-        }
-        .targets-compact {
-          grid-template-columns: 1fr;
-        }
-        .stats-grid {
-          grid-template-columns: repeat(2, minmax(120px, 1fr));
-        }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        * {
-          animation: none !important;
-          transition: none !important;
         }
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <div class="hero">
-        <div class="hero-meta">
-          <h1>Polymarket 多盘口机器人控制台</h1>
-          <div class="muted">保存后会写入 <code>config/runtime.json</code>，并通知 bot 在下一轮自动热重载。</div>
-        </div>
-        <div class="pill">Live Runtime + Risk Guard</div>
-      </div>
-      <div class="row" style="margin: 8px 0 12px">
-        <button id="refreshBalanceBtn">刷新余额</button>
-        <button id="claimBalanceBtn">赎回收益</button>
-        <span id="balanceInfo" class="muted">余额加载中...</span>
-      </div>
-      <div class="scan-control">
-        <div class="scan-info">
-          <span id="scanStateDot" class="scan-dot"></span>
+      <section class="card hero">
+        <div class="hero-top">
           <div>
-            <div id="scanStateTitle" class="scan-title">扫描状态: 已暂停</div>
-            <div id="scanStateMeta" class="muted">Web 控制模式，需手动开始</div>
+            <h1>Polymarket AI 15m Bot</h1>
+            <div class="muted">保留底层交易执行与结算，预测层改为单模型 LLM。默认建议使用模拟模式。</div>
+          </div>
+          <div class="row">
+            <span class="pill" id="modePill">运行模式读取中...</span>
+            <span class="pill" id="balanceInfo">余额读取中...</span>
           </div>
         </div>
-        <div class="scan-actions">
-          <button id="scanToggleBtn" class="scan-off">开始扫描并运行预测</button>
-          <button id="scanRefreshBtn">刷新状态</button>
+
+        <div class="scan-control">
+          <div class="scan-info">
+            <span class="scan-dot" id="scanDot"></span>
+            <div>
+              <div id="scanTitle"><strong>扫描状态读取中...</strong></div>
+              <div class="muted" id="scanMeta"></div>
+            </div>
+          </div>
+          <div class="row">
+            <button class="secondary" id="refreshBalanceBtn">刷新余额</button>
+            <button class="secondary" id="claimBalanceBtn">赎回收益</button>
+            <button class="secondary" id="scanRefreshBtn">刷新状态</button>
+            <button id="scanToggleBtn">切换扫描</button>
+          </div>
         </div>
+      </section>
+
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="runtime">运行配置</button>
+        <button class="tab-btn" data-tab="trades">交易记录</button>
+        <button class="tab-btn" data-tab="predictions">AI 判定</button>
+        <button class="tab-btn" data-tab="logs">运行日志</button>
       </div>
 
-      <div class="tabbar" role="tablist" aria-label="模块切换">
-        <button class="tab-btn active" id="tabRuntime" data-tab="runtime" role="tab" aria-selected="true">运行配置</button>
-        <button class="tab-btn" id="tabTrades" data-tab="trades" role="tab" aria-selected="false">交易记录</button>
-        <button class="tab-btn" id="tabLogs" data-tab="logs" role="tab" aria-selected="false">运行日志</button>
-        <button class="tab-btn" id="tabModels" data-tab="models" role="tab" aria-selected="false">模型工厂</button>
-        <button class="tab-btn" id="tabBacktest" data-tab="backtest" role="tab" aria-selected="false">回测模块</button>
-      </div>
-
-      <div class="grid">
-        <section class="card config-card module-panel active" data-module="runtime" role="tabpanel">
-          <h2>运行与风控配置</h2>
-          <div class="row" style="margin-bottom: 10px">
-            <button id="loadBtn">刷新配置</button>
-            <button id="saveBtn">保存并生效</button>
-            <span id="cfgStatus" class="muted"></span>
+      <section class="card panel active" data-panel="runtime">
+        <div class="toolbar">
+          <div>
+            <h2>运行与 AI 配置</h2>
+            <div class="muted" id="cfgStatus">配置未加载</div>
           </div>
+          <div class="row">
+            <button class="secondary" id="loadBtn">重新加载</button>
+            <button id="saveBtn">保存配置</button>
+          </div>
+        </div>
 
-          <div class="form-grid">
-            <div class="field">
-              <label>轮询间隔(秒)</label>
-              <input id="pollIntervalSec" type="number" min="5" step="1" />
-            </div>
-            <div class="field">
-              <label>最小 Edge</label>
-              <input id="minEdge" type="number" min="0" step="0.001" />
-            </div>
-            <div class="field">
-              <label>固定挂单价格(0-1；输入45会按0.45处理)</label>
-              <input id="fixedOrderPrice" type="number" min="0.01" max="100" step="0.01" />
-            </div>
-            <div class="field">
-              <label>单笔最大实际花费($)</label>
-              <input id="maxOrderNotionalUsd" type="number" min="0.1" step="0.1" />
-            </div>
-            <div class="field">
-              <label>开盘挂单窗口(秒)</label>
-              <input id="cycleStartWindowSec" type="number" min="10" step="1" />
-            </div>
-            <div class="field">
-              <label>自动领取间隔(秒)</label>
-              <input id="claimCooldownSec" type="number" min="30" step="1" />
-            </div>
-            <div class="field">
-              <label>最大回撤(%, 0=关闭)</label>
-              <input id="maxDrawdownPct" type="number" min="0" step="0.1" />
-            </div>
-            <div class="field">
-              <label>最大未结算笔数(0=关闭)</label>
-              <input id="maxOpenTrades" type="number" min="0" step="1" />
-            </div>
-            <div class="field">
-              <label>当日最大交易数(0=关闭)</label>
-              <input id="maxTradesPerDay" type="number" min="0" step="1" />
-            </div>
-            <div class="field">
-              <label>连续亏损熔断(0=关闭)</label>
-              <input id="maxConsecutiveLosses" type="number" min="0" step="1" />
+        <div class="grid-3" style="margin-top: 14px;">
+          <div class="section">
+            <h2>运行参数</h2>
+            <div class="grid-2" style="margin-top: 12px;">
+              <label class="toggle"><input id="dryRun" type="checkbox" />模拟模式 dry-run</label>
+              <label class="toggle"><input id="autoClaim" type="checkbox" />自动赎回</label>
+              <div class="field"><label for="pollIntervalSec">轮询间隔(秒)</label><input id="pollIntervalSec" type="number" min="5" step="1" /></div>
+              <div class="field"><label for="claimCooldownSec">赎回冷却(秒)</label><input id="claimCooldownSec" type="number" min="30" step="1" /></div>
+              <div class="field"><label for="maxOpenTrades">最大未结算单</label><input id="maxOpenTrades" type="number" min="0" step="1" /></div>
+              <div class="field"><label for="maxTradesPerDay">单日最大交易数</label><input id="maxTradesPerDay" type="number" min="0" step="1" /></div>
+              <div class="field"><label for="maxConsecutiveLosses">最大连续亏损</label><input id="maxConsecutiveLosses" type="number" min="0" step="1" /></div>
+              <div class="field"><label for="maxDrawdownPct">最大回撤%</label><input id="maxDrawdownPct" type="number" min="0" step="0.1" /></div>
             </div>
           </div>
 
-          <div class="row" style="margin: 10px 0 14px">
-            <label class="toggle"><input id="dryRun" type="checkbox" /> dryRun（不真实下单）</label>
-            <label class="toggle"><input id="autoClaim" type="checkbox" /> 自动领取收益</label>
+          <div class="section">
+            <h2>交易阈值</h2>
+            <div class="grid-2" style="margin-top: 12px;">
+              <div class="field"><label for="factLookbackMinutes">事实回看分钟</label><input id="factLookbackMinutes" type="number" min="30" step="1" /></div>
+              <div class="field"><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" min="0" max="1" step="0.01" /></div>
+              <div class="field"><label for="fixedOrderPrice">固定挂单价格</label><input id="fixedOrderPrice" type="number" min="0.01" max="100" step="0.01" /></div>
+              <div class="field"><label for="maxOrderNotionalUsd">单笔最大金额</label><input id="maxOrderNotionalUsd" type="number" min="0.1" step="0.1" /></div>
+              <div class="field"><label>AI 模型来源</label><input type="text" value=".env 单模型配置" disabled /></div>
+              <div class="field"><label>默认提供方</label><input type="text" value="DeepSeek" disabled /></div>
+            </div>
           </div>
 
-          <h2>盘口启用开关 <span class="chip" id="enabledCount">0 / 0</span></h2>
-          <div class="table-wrap">
-            <div id="targetsList" class="targets-compact"></div>
-          </div>
-        </section>
-
-        <section class="card trade-card module-panel" data-module="trades" role="tabpanel">
-          <h2>交易表现</h2>
-          <div class="row" style="margin-bottom: 8px">
-            <button id="refreshTradesBtn">刷新交易</button>
-            <button id="clearTradesBtn">清空交易记录</button>
-            <label class="muted">每页</label>
-            <select id="tradePageSize" class="select">
-              <option value="10">10</option>
-              <option value="20" selected>20</option>
-              <option value="50">50</option>
-            </select>
-            <label class="muted">盘口</label>
-            <select id="tradeTarget" class="select">
-              <option value="">全部</option>
-            </select>
-            <label class="muted">状态</label>
-            <select id="tradeResolved" class="select">
-              <option value="">全部</option>
-              <option value="true">已结算</option>
-              <option value="false">待结算</option>
-            </select>
-            <span id="tradeStatus" class="muted"></span>
-          </div>
-
-          <div class="stats-grid">
-            <div class="stat"><div class="label">总交易</div><div class="value" id="sTotal">0</div></div>
-            <div class="stat"><div class="label">已结算</div><div class="value" id="sSettled">0</div></div>
-            <div class="stat"><div class="label">待结算</div><div class="value" id="sPending">0</div></div>
-            <div class="stat"><div class="label">胜场</div><div class="value" id="sWins">0</div></div>
-            <div class="stat"><div class="label">负场</div><div class="value" id="sLosses">0</div></div>
-            <div class="stat"><div class="label">胜率</div><div class="value" id="sWinRate">0%</div></div>
-          </div>
-
-          <div class="table-wrap">
+          <div class="section">
+            <h2>15m 目标</h2>
+            <div class="muted" style="margin: 4px 0 10px;">当前只保留 15 分钟维度，启用目标会参与轮询。</div>
             <table>
               <thead>
                 <tr>
-                  <th>盘口</th>
-                  <th>方向</th>
-                  <th>结果</th>
-                  <th>模式</th>
-                  <th>入场价</th>
-                  <th>结算价</th>
-                  <th>进场时间</th>
-                </tr>
-              </thead>
-              <tbody id="tradesBody"></tbody>
-            </table>
-          </div>
-
-          <div class="row" style="margin-top: 10px">
-            <button id="tradePrevBtn">上一页</button>
-            <button id="tradeNextBtn">下一页</button>
-            <span id="tradePageInfo" class="muted"></span>
-          </div>
-        </section>
-
-        <section class="card log-card module-panel" data-module="logs" role="tabpanel">
-          <h2>运行日志</h2>
-          <div class="row" style="margin-bottom: 8px">
-            <button id="refreshLogBtn">刷新日志</button>
-            <button id="clearLogBtn">清空日志</button>
-            <label class="muted" for="tailInput">tail</label>
-            <input id="tailInput" type="number" value="200" min="50" max="2000" style="width: 90px" />
-            <span id="logStatus" class="muted"></span>
-          </div>
-          <div class="log-wrap">
-            <pre id="logArea"></pre>
-          </div>
-        </section>
-
-        <section class="card module-panel" data-module="models" role="tabpanel">
-          <h2>模型工厂</h2>
-          <div class="row" style="margin-bottom: 8px">
-            <button id="refreshModelsBtn">刷新模型</button>
-            <button id="initModelsBtn">初始化默认模型</button>
-            <button id="trainModelBtn">训练当前模型</button>
-            <button id="newModelBtn">新建模型</button>
-            <label class="muted" for="modelListFilter">列表筛选</label>
-            <select id="modelListFilter" class="select" style="min-width: 140px;">
-              <option value="">全部盘口</option>
-            </select>
-            <span id="modelsStatus" class="muted"></span>
-          </div>
-
-          <div class="form-grid" style="margin-top: 6px">
-            <div class="field">
-              <label>训练目标</label>
-              <select id="modelTarget" class="select"></select>
-            </div>
-            <div class="field">
-              <label>模型名称</label>
-              <input id="modelName" type="text" placeholder="BTC_5m_d21_custom" />
-            </div>
-            <div class="field">
-              <label>训练天数</label>
-              <input id="modelTrainDays" type="number" min="1" step="1" />
-            </div>
-            <div class="field">
-              <label>lookback(分钟)</label>
-              <input id="modelLookback" type="number" min="60" step="1" />
-            </div>
-            <div class="field">
-              <label>step(分钟)</label>
-              <input id="modelStep" type="number" min="1" step="1" />
-            </div>
-            <div class="field">
-              <label>valDays</label>
-              <input id="modelValDays" type="number" min="1" step="1" />
-            </div>
-            <div class="field">
-              <label>epochs</label>
-              <input id="modelEpochs" type="number" min="20" step="1" />
-            </div>
-            <div class="field">
-              <label>learningRate</label>
-              <input id="modelLr" type="number" min="0.00001" step="0.00001" />
-            </div>
-            <div class="field">
-              <label>L2</label>
-              <input id="modelL2" type="number" min="0" step="0.0001" />
-            </div>
-            <div class="field">
-              <label>patience</label>
-              <input id="modelPatience" type="number" min="5" step="1" />
-            </div>
-            <div class="field" style="grid-column: span 2;">
-              <label>模型输出路径</label>
-              <input id="modelPath" type="text" placeholder="state/models/btc_5m_custom.json" />
-            </div>
-          </div>
-
-          <div class="row" style="margin-bottom: 8px">
-            <button id="saveModelBtn">保存模型配置</button>
-            <span id="modelEditorStatus" class="muted"></span>
-          </div>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>选择</th>
-                  <th>名称</th>
+                  <th>启用</th>
                   <th>目标</th>
-                  <th>训练天数</th>
-                  <th>状态</th>
-                  <th>模型路径</th>
-                  <th>最近训练</th>
-                  <th>操作</th>
+                  <th>交易对</th>
                 </tr>
               </thead>
-              <tbody id="modelsBody">
-                <tr><td colspan="8" class="muted">暂无模型配置</td></tr>
-              </tbody>
+              <tbody id="targetsBody"></tbody>
             </table>
           </div>
-        </section>
+        </div>
 
-        <section class="card module-panel" data-module="backtest" role="tabpanel">
-          <h2>模型回测</h2>
-          <div class="row" style="margin-bottom: 8px">
-            <label class="muted">盘口</label>
-            <select id="btTarget" class="select"></select>
-            <label class="muted">模型</label>
-            <select id="btModel" class="select"></select>
-            <label class="muted">周期</label>
-            <select id="btDays" class="select"></select>
-            <label class="muted">每页</label>
-            <select id="btPageSize" class="select">
-              <option value="50">50</option>
-              <option value="100" selected>100</option>
-              <option value="200">200</option>
-            </select>
-            <button id="runBacktestBtn">开始回测</button>
-            <span id="btStatus" class="muted"></span>
+        <div class="grid-2" style="margin-top: 12px;">
+          <div class="section">
+            <h2>系统提示词</h2>
+            <div class="muted" style="margin: 4px 0 10px;">建议只写角色、约束和 ABSTAIN 规则，不写格式要求。</div>
+            <textarea id="systemPrompt"></textarea>
           </div>
 
-          <div class="row" style="margin-bottom: 8px">
-            <span class="muted">最大连续错误(全样本): <b id="btMaxErr">-</b></span>
-            <span class="muted">最大连续错误(触发交易): <b id="btMaxTradeErr">-</b></span>
+          <div class="section">
+            <h2>用户提示词模板</h2>
+            <div class="muted" style="margin: 4px 0 10px;">支持变量：<code>{{coin}}</code> <code>{{symbol}}</code> <code>{{horizonMin}}</code> <code>{{factsJson}}</code></div>
+            <textarea id="userPromptTemplate"></textarea>
           </div>
+        </div>
 
-          <div class="row" style="margin-bottom: 8px">
-            <label class="target-item" style="padding:6px 10px;">
-              <input id="btCompareDefault" type="checkbox" checked />
-              <span>包含默认模型</span>
-            </label>
-            <button id="runBacktestCompareBtn">对比当前盘口全部模型</button>
-            <span id="btCompareStatus" class="muted"></span>
+        <div class="section" style="margin-top: 12px;">
+          <div class="toolbar">
+            <div>
+              <h2>AI 模型（只读）</h2>
+              <div class="muted" id="providersStatus">模型配置来自 .env，不在 Web 中编辑。默认按 DeepSeek 配置，支持自定义 baseUrl。</div>
+            </div>
+            <div class="provider-actions">
+            </div>
           </div>
-
-          <div class="table-wrap">
-            <table>
+          <div style="overflow:auto; margin-top: 12px;">
+            <table class="provider-table">
               <thead>
                 <tr>
-                  <th>排名</th>
+                  <th>名称</th>
+                  <th>ID</th>
+                  <th>类型</th>
                   <th>模型</th>
-                  <th>交易胜率</th>
-                  <th>交易次数</th>
-                  <th>模型胜率</th>
-                  <th>交易出现率</th>
-                  <th>最大连错(交易)</th>
-                  <th>样本数</th>
-                  <th>状态</th>
+                  <th>Base URL</th>
+                  <th>Key 状态</th>
+                  <th>Reasoning</th>
+                  <th>Temp</th>
+                  <th>Max Tokens</th>
+                  <th>Response</th>
                 </tr>
               </thead>
-              <tbody id="btCompareBody">
-                <tr><td colspan="9" class="muted">点击“对比当前盘口全部模型”开始</td></tr>
-              </tbody>
+              <tbody id="providersBody"></tbody>
             </table>
           </div>
+        </div>
+      </section>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>盘口</th>
-                  <th>样本数</th>
-                  <th>模型胜率</th>
-                  <th>交易次数</th>
-                  <th>交易胜率</th>
-                  <th>交易出现率</th>
-                </tr>
-              </thead>
-              <tbody id="btBody">
-                <tr><td colspan="6" class="muted">请选择盘口后运行回测</td></tr>
-              </tbody>
-            </table>
+      <section class="card panel" data-panel="trades">
+        <div class="toolbar">
+          <div>
+            <h2>交易记录</h2>
+            <div class="muted" id="tradeStatus">尚未加载</div>
           </div>
+          <div class="table-actions">
+            <select id="tradeTarget"></select>
+            <select id="tradeResolved">
+              <option value="">全部状态</option>
+              <option value="false">未结算</option>
+              <option value="true">已结算</option>
+            </select>
+            <select id="tradePageSize">
+              <option value="20">20 / 页</option>
+              <option value="50">50 / 页</option>
+              <option value="100">100 / 页</option>
+            </select>
+            <button class="secondary" id="refreshTradesBtn">刷新</button>
+            <button class="danger" id="clearTradesBtn">清空</button>
+          </div>
+        </div>
 
-          <div class="table-wrap" style="margin-top:10px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>开始时间</th>
-                  <th>结束时间</th>
-                  <th>预测</th>
-                  <th>真实</th>
-                  <th>概率UP</th>
-                  <th>Edge</th>
-                  <th>触发交易</th>
-                  <th>结果</th>
-                  <th>开始价</th>
-                  <th>结束价</th>
-                </tr>
-              </thead>
-              <tbody id="btRecordsBody">
-                <tr><td colspan="11" class="muted">暂无回测明细</td></tr>
-              </tbody>
-            </table>
-          </div>
+        <div class="stats" style="margin-top: 14px;">
+          <div class="stat"><span class="muted">总交易</span><strong id="sTotal">0</strong></div>
+          <div class="stat"><span class="muted">已结算</span><strong id="sSettled">0</strong></div>
+          <div class="stat"><span class="muted">未结算</span><strong id="sPending">0</strong></div>
+          <div class="stat"><span class="muted">胜</span><strong id="sWins">0</strong></div>
+          <div class="stat"><span class="muted">负</span><strong id="sLosses">0</strong></div>
+          <div class="stat"><span class="muted">胜率</span><strong id="sWinRate">0%</strong></div>
+        </div>
 
-          <div class="row" style="margin-top: 10px">
-            <button id="btPrevBtn">上一页</button>
-            <button id="btNextBtn">下一页</button>
-            <span id="btPageInfo" class="muted"></span>
+        <div style="overflow:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>市场</th>
+                <th>方向</th>
+                <th>AI</th>
+                <th>状态</th>
+                <th>模式</th>
+                <th>入场价</th>
+                <th>入场时间</th>
+              </tr>
+            </thead>
+            <tbody id="tradesBody"></tbody>
+          </table>
+        </div>
+
+        <div class="toolbar" style="margin-top: 12px;">
+          <div class="muted" id="tradePageInfo"></div>
+          <div class="row">
+            <button class="secondary" id="tradePrevBtn">上一页</button>
+            <button class="secondary" id="tradeNextBtn">下一页</button>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
+
+      <section class="card panel" data-panel="predictions">
+        <div class="toolbar">
+          <div>
+            <h2>最近 AI 判定</h2>
+            <div class="muted" id="predictionStatus">尚未加载</div>
+          </div>
+          <div class="table-actions">
+            <select id="predictionLimit">
+              <option value="25">最近 25 条</option>
+              <option value="50">最近 50 条</option>
+              <option value="100">最近 100 条</option>
+            </select>
+            <button class="secondary" id="refreshPredictionsBtn">刷新</button>
+            <button class="danger" id="clearPredictionsBtn">清空</button>
+          </div>
+        </div>
+
+        <div style="overflow:auto; margin-top: 12px;">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>目标</th>
+                <th>市场</th>
+                <th>模型</th>
+                <th>方向</th>
+                <th>ProbUp</th>
+                <th>置信度</th>
+                <th>动作</th>
+                <th>提交元数据</th>
+                <th>摘要</th>
+              </tr>
+            </thead>
+            <tbody id="predictionsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card panel" data-panel="logs">
+        <div class="toolbar">
+          <div>
+            <h2>运行日志</h2>
+            <div class="muted" id="logStatus">尚未加载</div>
+          </div>
+          <div class="table-actions">
+            <input id="tailInput" type="number" min="50" step="50" value="200" style="width: 110px;" />
+            <button class="secondary" id="refreshLogBtn">刷新</button>
+            <button class="danger" id="clearLogBtn">清空</button>
+          </div>
+        </div>
+        <pre id="logArea"></pre>
+      </section>
     </div>
 
     <script>
       let fullConfig = null;
+      let activeTab = "runtime";
       const tradeQuery = { page: 1, pageSize: 20, targetId: "", resolved: "" };
-      const btQuery = { page: 1, pageSize: 100 };
-      let btRecordsAll = [];
-      let btCompareItems = [];
-      let modelProfiles = [];
-      let selectedModelProfileId = "";
-      let modelListFilterTargetId = "";
 
       const cfgStatus = document.getElementById("cfgStatus");
-      const logArea = document.getElementById("logArea");
-      const logStatus = document.getElementById("logStatus");
-      const tailInput = document.getElementById("tailInput");
-      const targetsList = document.getElementById("targetsList");
-      const enabledCount = document.getElementById("enabledCount");
       const balanceInfo = document.getElementById("balanceInfo");
-      const claimBalanceBtn = document.getElementById("claimBalanceBtn");
-      const scanStateDot = document.getElementById("scanStateDot");
-      const scanStateTitle = document.getElementById("scanStateTitle");
-      const scanStateMeta = document.getElementById("scanStateMeta");
+      const modePill = document.getElementById("modePill");
+      const scanDot = document.getElementById("scanDot");
+      const scanTitle = document.getElementById("scanTitle");
+      const scanMeta = document.getElementById("scanMeta");
       const scanToggleBtn = document.getElementById("scanToggleBtn");
       const scanRefreshBtn = document.getElementById("scanRefreshBtn");
-      let botControl = {
-        mode: "STANDALONE",
-        switchEnabled: false,
-        scanningEnabled: true,
-        effectiveScanning: true,
-        updatedAt: "",
-        updatedBy: "",
-      };
-
+      const claimBalanceBtn = document.getElementById("claimBalanceBtn");
+      const targetsBody = document.getElementById("targetsBody");
+      const providersBody = document.getElementById("providersBody");
+      const tradesBody = document.getElementById("tradesBody");
       const tradeStatus = document.getElementById("tradeStatus");
       const tradeTarget = document.getElementById("tradeTarget");
       const tradeResolved = document.getElementById("tradeResolved");
       const tradePageSize = document.getElementById("tradePageSize");
-      const tradesBody = document.getElementById("tradesBody");
+      const tradePageInfo = document.getElementById("tradePageInfo");
       const tradePrevBtn = document.getElementById("tradePrevBtn");
       const tradeNextBtn = document.getElementById("tradeNextBtn");
-      const tradePageInfo = document.getElementById("tradePageInfo");
-      const btTarget = document.getElementById("btTarget");
-      const btModel = document.getElementById("btModel");
-      const btDays = document.getElementById("btDays");
-      const btPageSize = document.getElementById("btPageSize");
-      const btBody = document.getElementById("btBody");
-      const btRecordsBody = document.getElementById("btRecordsBody");
-      const btStatus = document.getElementById("btStatus");
-      const btMaxErr = document.getElementById("btMaxErr");
-      const btMaxTradeErr = document.getElementById("btMaxTradeErr");
-      const btPrevBtn = document.getElementById("btPrevBtn");
-      const btNextBtn = document.getElementById("btNextBtn");
-      const btPageInfo = document.getElementById("btPageInfo");
-      const runBacktestBtn = document.getElementById("runBacktestBtn");
-      const runBacktestCompareBtn = document.getElementById("runBacktestCompareBtn");
-      const btCompareDefault = document.getElementById("btCompareDefault");
-      const btCompareStatus = document.getElementById("btCompareStatus");
-      const btCompareBody = document.getElementById("btCompareBody");
-      const refreshModelsBtn = document.getElementById("refreshModelsBtn");
-      const initModelsBtn = document.getElementById("initModelsBtn");
-      const trainModelBtn = document.getElementById("trainModelBtn");
-      const newModelBtn = document.getElementById("newModelBtn");
-      const modelListFilter = document.getElementById("modelListFilter");
-      const saveModelBtn = document.getElementById("saveModelBtn");
-      const modelsStatus = document.getElementById("modelsStatus");
-      const modelEditorStatus = document.getElementById("modelEditorStatus");
-      const modelTarget = document.getElementById("modelTarget");
-      const modelName = document.getElementById("modelName");
-      const modelTrainDays = document.getElementById("modelTrainDays");
-      const modelLookback = document.getElementById("modelLookback");
-      const modelStep = document.getElementById("modelStep");
-      const modelValDays = document.getElementById("modelValDays");
-      const modelEpochs = document.getElementById("modelEpochs");
-      const modelLr = document.getElementById("modelLr");
-      const modelL2 = document.getElementById("modelL2");
-      const modelPatience = document.getElementById("modelPatience");
-      const modelPath = document.getElementById("modelPath");
-      const modelsBody = document.getElementById("modelsBody");
-      const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
-      const modulePanels = Array.from(document.querySelectorAll(".module-panel"));
-      let activeTab = "runtime";
+      const predictionsBody = document.getElementById("predictionsBody");
+      const predictionStatus = document.getElementById("predictionStatus");
+      const predictionLimit = document.getElementById("predictionLimit");
+      const providersStatus = document.getElementById("providersStatus");
+      const logArea = document.getElementById("logArea");
+      const logStatus = document.getElementById("logStatus");
+      const tailInput = document.getElementById("tailInput");
 
-      const num = (id, fallback) => {
-        const v = Number(document.getElementById(id).value);
-        return Number.isFinite(v) ? v : fallback;
-      };
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
 
-      const setValue = (id, value) => {
+      function fmtTime(value) {
+        if (!value) return "-";
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return String(value);
+        return d.toLocaleString();
+      }
+
+      function fmtNumber(value, digits = 4) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n.toFixed(digits) : "-";
+      }
+
+      function fmtPct(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : "-";
+      }
+
+      function fmtJson(value) {
+        try {
+          return JSON.stringify(value, null, 2);
+        } catch {
+          return String(value ?? "");
+        }
+      }
+
+      function setValue(id, value) {
         const el = document.getElementById(id);
-        el.value = value == null ? "" : String(value);
-      };
-      const shortModelName = (p) => {
-        const text = String(p || "").trim();
-        if (!text) return "-";
-        const parts = text.split(/[\\/]/);
-        return parts[parts.length - 1] || text;
-      };
-
-      const fmtNumber = (v, d = 4) => {
-        const n = Number(v);
-        if (!Number.isFinite(n)) return "-";
-        return n.toFixed(d);
-      };
-      const escapeHtml = (v) =>
-        String(v ?? "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/\"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-
-      const fmtTime = (iso) => {
-        if (!iso) return "-";
-        const t = new Date(iso);
-        if (Number.isNaN(t.getTime())) return String(iso);
-        return t.toLocaleString();
-      };
-
-      function renderBotControl() {
-        const enabled = Boolean(botControl?.effectiveScanning);
-        const webControlled = Boolean(botControl?.switchEnabled);
-        scanStateDot.classList.toggle("on", enabled);
-        scanStateTitle.textContent = enabled ? "扫描状态: 运行中" : "扫描状态: 已暂停";
-        const modeText = webControlled ? "Web 控制模式" : "纯 Bot 模式";
-        const updateText = botControl?.updatedAt ? `，更新: ${fmtTime(botControl.updatedAt)}` : "";
-        scanStateMeta.textContent = `${modeText}${updateText}`;
-
-        if (!webControlled) {
-          scanToggleBtn.disabled = true;
-          scanToggleBtn.textContent = "纯 Bot 模式（开关无效）";
-          scanToggleBtn.classList.remove("scan-on");
-          scanToggleBtn.classList.add("scan-off");
-          return;
-        }
-
-        scanToggleBtn.disabled = false;
-        scanToggleBtn.textContent = enabled ? "停止扫描与下单" : "开始扫描并运行预测";
-        scanToggleBtn.classList.toggle("scan-on", enabled);
-        scanToggleBtn.classList.toggle("scan-off", !enabled);
+        if (el) el.value = value == null ? "" : String(value);
       }
 
-      async function loadBotControl() {
-        try {
-          const resp = await fetch("/api/bot/control");
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          botControl = {
-            mode: String(data?.mode || "STANDALONE"),
-            switchEnabled: Boolean(data?.switchEnabled),
-            scanningEnabled: Boolean(data?.scanningEnabled),
-            effectiveScanning: Boolean(data?.effectiveScanning),
-            updatedAt: String(data?.updatedAt || ""),
-            updatedBy: String(data?.updatedBy || ""),
-          };
-          renderBotControl();
-        } catch (err) {
-          scanStateTitle.textContent = "扫描状态: 读取失败";
-          scanStateMeta.textContent = String(err);
-        }
-      }
-
-      async function toggleBotControl() {
-        if (!botControl.switchEnabled) {
-          return;
-        }
-        const nextEnabled = !Boolean(botControl.scanningEnabled);
-        scanToggleBtn.disabled = true;
-        try {
-          const resp = await fetch("/api/bot/control", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ scanningEnabled: nextEnabled }),
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          botControl = {
-            mode: String(data?.mode || "STANDALONE"),
-            switchEnabled: Boolean(data?.switchEnabled),
-            scanningEnabled: Boolean(data?.scanningEnabled),
-            effectiveScanning: Boolean(data?.effectiveScanning),
-            updatedAt: String(data?.updatedAt || ""),
-            updatedBy: String(data?.updatedBy || ""),
-          };
-          renderBotControl();
-        } catch (err) {
-          scanStateMeta.textContent = `切换失败: ${String(err)}`;
-        } finally {
-          if (botControl.switchEnabled) {
-            scanToggleBtn.disabled = false;
-          }
-        }
+      function num(id, fallback) {
+        const el = document.getElementById(id);
+        const n = Number(el?.value);
+        return Number.isFinite(n) ? n : fallback;
       }
 
       function setActiveTab(tab) {
         activeTab = tab;
-        tabButtons.forEach((btn) => {
-          const on = btn.getAttribute("data-tab") === tab;
-          btn.classList.toggle("active", on);
-          btn.setAttribute("aria-selected", on ? "true" : "false");
+        document.querySelectorAll(".tab-btn").forEach((btn) => {
+          btn.classList.toggle("active", btn.getAttribute("data-tab") === tab);
         });
-        modulePanels.forEach((panel) => {
-          const on = panel.getAttribute("data-module") === tab;
-          panel.classList.toggle("active", on);
+        document.querySelectorAll(".panel").forEach((panel) => {
+          panel.classList.toggle("active", panel.getAttribute("data-panel") === tab);
         });
-      }
-
-      function targetModelOptions(target) {
-        const out = [];
-        const seen = new Set();
-        const configuredPath = String(target?.modelPath || "").trim();
-        if (configuredPath) {
-          const hit = modelProfiles.find((p) => p.targetId === target.id && String(p.modelPath || "").trim() === configuredPath);
-          const label = hit?.name ? `${hit.name}` : `${shortModelName(configuredPath)}`;
-          out.push({ value: configuredPath, label });
-          seen.add(configuredPath);
-        }
-        for (const p of modelProfiles) {
-          if (p.targetId !== target.id) continue;
-          const modelPath = String(p.modelPath || "").trim();
-          if (!modelPath || seen.has(modelPath)) continue;
-          seen.add(modelPath);
-          out.push({ value: modelPath, label: p.name || modelPath });
-        }
-        return out;
       }
 
       function renderTargets(targets) {
-        targetsList.innerHTML = "";
-        let enabled = 0;
-
-        for (let i = 0; i < targets.length; i += 1) {
-          const t = targets[i];
-          if (t.enabled) enabled += 1;
-
-          const horizonText = Number(t.horizonMin) === 60 ? "1H" : `${t.horizonMin}M`;
-          const name = `${t.coin || "-"}-${horizonText}`;
-          const row = document.createElement("div");
-          row.className = "target-item target-row";
-          const opts = targetModelOptions(t);
-          const selectedModelPath = String(t.modelPath || "").trim();
-          const modelSelectHtml = opts.length
-            ? opts.map((o) => `<option value="${escapeHtml(o.value)}" ${o.value === selectedModelPath ? "selected" : ""}>${escapeHtml(o.label)}</option>`).join("")
-            : `<option value="${escapeHtml(selectedModelPath)}">${escapeHtml(selectedModelPath || "未配置模型")}</option>`;
-          row.innerHTML = `
-            <label class="target-main">
-              <input type="checkbox" class="target-enabled" data-idx="${i}" data-target-id="${escapeHtml(t.id || "")}" ${t.enabled ? "checked" : ""} />
-              <span>${name}</span>
-            </label>
-            <select class="select target-model" data-idx="${i}" data-target-id="${escapeHtml(t.id || "")}">
-              ${modelSelectHtml}
-            </select>
-          `;
-          targetsList.appendChild(row);
+        targetsBody.innerHTML = "";
+        const list = Array.isArray(targets) ? targets : [];
+        if (!list.length) {
+          targetsBody.innerHTML = '<tr><td colspan="3" class="muted">暂无目标</td></tr>';
+          return;
         }
+        for (const [idx, target] of list.entries()) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td><input class="target-enabled" data-idx="${idx}" type="checkbox" ${target.enabled ? "checked" : ""} /></td>
+            <td>${escapeHtml(`${target.coin || "-"}-15M`)}</td>
+            <td><input class="target-symbol" data-idx="${idx}" type="text" value="${escapeHtml(target.symbol || "")}" /></td>
+          `;
+          targetsBody.appendChild(tr);
+        }
+      }
 
-        enabledCount.textContent = `${enabled} / ${targets.length}`;
+      function renderProvider(provider) {
+        providersBody.innerHTML = "";
+        if (!provider) {
+          providersBody.innerHTML = '<tr><td colspan="10" class="muted">当前未从 .env 解析到模型配置</td></tr>';
+          return;
+        }
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(provider.label || "-")}</td>
+          <td>${escapeHtml(provider.id || "-")}</td>
+          <td>${escapeHtml(provider.apiType || "-")}</td>
+          <td>${escapeHtml(provider.model || "-")}</td>
+          <td>${escapeHtml(provider.baseUrl || "-")}</td>
+          <td>${provider.hasApiKey ? "已配置" : "缺失"}</td>
+          <td>${escapeHtml(provider.reasoningEffort || "-")}</td>
+          <td>${escapeHtml(provider.temperature ?? "-")}</td>
+          <td>${escapeHtml(provider.maxOutputTokens ?? "-")}</td>
+          <td>${escapeHtml(provider.responseMode || "-")}</td>
+        `;
+        providersBody.appendChild(tr);
       }
 
       function renderTradeTargets(targets) {
         const prev = tradeTarget.value || "";
-        tradeTarget.innerHTML = '<option value="">全部</option>';
-        for (const t of targets || []) {
+        tradeTarget.innerHTML = '<option value="">全部盘口</option>';
+        for (const target of Array.isArray(targets) ? targets : []) {
           const opt = document.createElement("option");
-          opt.value = t.id || "";
-          opt.textContent = `${t.coin || "-"}-${Number(t.horizonMin) === 60 ? "1H" : `${t.horizonMin}M`}`;
+          opt.value = target.id || "";
+          opt.textContent = `${target.coin || "-"}-15M`;
           tradeTarget.appendChild(opt);
         }
         tradeTarget.value = prev;
-      }
-
-      function getBacktestDaysOptions(horizonMin) {
-        if (Number(horizonMin) === 5) return [1, 3, 7];
-        if (Number(horizonMin) === 15) return [1, 3, 7, 15];
-        if (Number(horizonMin) === 60) return [1, 3, 7, 15];
-        return [];
-      }
-
-      function modelLabel(p) {
-        if (!p) return "-";
-        const h = Number(p.horizonMin) === 60 ? "1h" : `${p.horizonMin}m`;
-        return `${p.name} (${p.coin}-${h})`;
-      }
-
-      function renderModelTargetOptions(targets) {
-        const prev = modelTarget.value || "";
-        modelTarget.innerHTML = "";
-        for (const t of targets || []) {
-          const opt = document.createElement("option");
-          opt.value = t.id || "";
-          opt.textContent = `${t.coin || "-"}-${Number(t.horizonMin) === 60 ? "1H" : `${t.horizonMin}M`}`;
-          modelTarget.appendChild(opt);
-        }
-        modelTarget.value = (targets || []).some((t) => t.id === prev) ? prev : ((targets || [])[0]?.id || "");
-      }
-
-      function renderModelListFilterOptions(targets) {
-        const prev = modelListFilter.value || modelListFilterTargetId || "";
-        modelListFilter.innerHTML = '<option value="">全部盘口</option>';
-        for (const t of targets || []) {
-          const opt = document.createElement("option");
-          opt.value = t.id || "";
-          opt.textContent = `${t.coin || "-"}-${Number(t.horizonMin) === 60 ? "1H" : `${t.horizonMin}M`}`;
-          modelListFilter.appendChild(opt);
-        }
-        modelListFilter.value = (targets || []).some((t) => t.id === prev) ? prev : "";
-        modelListFilterTargetId = modelListFilter.value || "";
-      }
-
-      function fillModelEditor(p) {
-        if (!p) return;
-        modelTarget.value = p.targetId || modelTarget.value;
-        modelName.value = p.name || "";
-        modelTrainDays.value = String(p.trainDays ?? 30);
-        modelLookback.value = String(p.lookbackMin ?? 180);
-        modelStep.value = String(p.stepMin ?? 1);
-        modelValDays.value = String(p.valDays ?? 3);
-        modelEpochs.value = String(p.epochs ?? 400);
-        modelLr.value = String(p.learningRate ?? 0.03);
-        modelL2.value = String(p.l2 ?? 0.001);
-        modelPatience.value = String(p.patience ?? 40);
-        modelPath.value = p.modelPath || "";
-      }
-
-      function getModelDefaultsByTargetId(targetId) {
-        const targets = Array.isArray(fullConfig?.prediction?.targets) ? fullConfig.prediction.targets : [];
-        const t = targets.find((x) => x.id === targetId);
-        const horizon = Number(t?.horizonMin || 5);
-        const coin = String(t?.coin || "BTC").toUpperCase();
-        const hTag = horizon === 60 ? "1h" : `${horizon}m`;
-        if (horizon === 5) {
-          return {
-            name: `${coin}_${hTag}_d21_custom`,
-            trainDays: 21,
-            lookbackMin: 180,
-            stepMin: 1,
-            valDays: 3,
-            epochs: 500,
-            learningRate: 0.04,
-            l2: 0.001,
-            patience: 60,
-            modelPath: `state/models/${coin.toLowerCase()}_${hTag}_custom_logreg.json`,
-          };
-        }
-        if (horizon === 15) {
-          return {
-            name: `${coin}_${hTag}_d45_custom`,
-            trainDays: 45,
-            lookbackMin: 240,
-            stepMin: 3,
-            valDays: 5,
-            epochs: 420,
-            learningRate: 0.03,
-            l2: 0.0015,
-            patience: 50,
-            modelPath: `state/models/${coin.toLowerCase()}_${hTag}_custom_logreg.json`,
-          };
-        }
-        return {
-          name: `${coin}_${hTag}_d90_custom`,
-          trainDays: 90,
-          lookbackMin: 360,
-          stepMin: 10,
-          valDays: 7,
-          epochs: 320,
-          learningRate: 0.02,
-          l2: 0.002,
-          patience: 40,
-          modelPath: `state/models/${coin.toLowerCase()}_${hTag}_custom_logreg.json`,
-        };
-      }
-
-      function fillModelEditorByTarget(targetId) {
-        const d = getModelDefaultsByTargetId(targetId);
-        modelTarget.value = targetId || modelTarget.value;
-        modelName.value = d.name;
-        modelTrainDays.value = String(d.trainDays);
-        modelLookback.value = String(d.lookbackMin);
-        modelStep.value = String(d.stepMin);
-        modelValDays.value = String(d.valDays);
-        modelEpochs.value = String(d.epochs);
-        modelLr.value = String(d.learningRate);
-        modelL2.value = String(d.l2);
-        modelPatience.value = String(d.patience);
-        modelPath.value = d.modelPath;
-      }
-
-      function renderBacktestModelOptions() {
-        const targetId = btTarget.value || "";
-        const list = modelProfiles.filter((p) => p.targetId === targetId);
-        const prev = btModel.value || "";
-        btModel.innerHTML = "";
-        if (!list.length) {
-          const opt = document.createElement("option");
-          opt.value = "";
-          opt.textContent = "默认目标模型";
-          btModel.appendChild(opt);
-          btModel.value = "";
-          return;
-        }
-        const firstDefault = document.createElement("option");
-        firstDefault.value = "";
-        firstDefault.textContent = "默认目标模型";
-        btModel.appendChild(firstDefault);
-        for (const p of list) {
-          const opt = document.createElement("option");
-          opt.value = p.id;
-          opt.textContent = modelLabel(p);
-          btModel.appendChild(opt);
-        }
-        btModel.value = list.some((x) => x.id === prev) ? prev : "";
-      }
-
-      function renderModelProfiles(list) {
-        modelProfiles = Array.isArray(list) ? list : [];
-        modelsBody.innerHTML = "";
-        const viewList = modelListFilterTargetId
-          ? modelProfiles.filter((p) => p.targetId === modelListFilterTargetId)
-          : modelProfiles;
-
-        if (!modelProfiles.length) {
-          modelsBody.innerHTML = '<tr><td colspan="8" class="muted">暂无模型配置</td></tr>';
-          selectedModelProfileId = "";
-          if (modelTarget.value) {
-            fillModelEditorByTarget(modelTarget.value);
-          }
-          renderBacktestModelOptions();
-          return;
-        }
-
-        if (!viewList.length) {
-          modelsBody.innerHTML = '<tr><td colspan="8" class="muted">当前筛选下暂无模型</td></tr>';
-        }
-
-        for (const p of viewList) {
-          const tr = document.createElement("tr");
-          const checked = p.id === selectedModelProfileId ? "checked" : "";
-          const horizonText = Number(p.horizonMin) === 60 ? "1h" : `${p.horizonMin}m`;
-          tr.innerHTML = `
-            <td><input type="radio" name="modelPick" value="${escapeHtml(p.id)}" ${checked} /></td>
-            <td>${escapeHtml(p.name || p.id)}</td>
-            <td>${escapeHtml(`${p.coin}-${horizonText.toUpperCase()}`)}</td>
-            <td>${Number(p.trainDays ?? 0)}</td>
-            <td>${escapeHtml(p.status || "idle")}</td>
-            <td>${escapeHtml(p.modelPath || "-")}</td>
-            <td>${p.lastTrainedAt ? fmtTime(p.lastTrainedAt) : "-"}</td>
-            <td><button class="model-delete" data-profile-id="${escapeHtml(p.id)}">删除</button></td>
-          `;
-          modelsBody.appendChild(tr);
-        }
-
-        if (!viewList.length) {
-          selectedModelProfileId = "";
-          if (modelTarget.value) fillModelEditorByTarget(modelTarget.value);
-          renderBacktestModelOptions();
-          return;
-        }
-
-        if (!selectedModelProfileId || !viewList.some((p) => p.id === selectedModelProfileId)) {
-          selectedModelProfileId = viewList[0].id;
-        }
-        const selected = modelProfiles.find((p) => p.id === selectedModelProfileId) || viewList[0];
-        if (selected) fillModelEditor(selected);
-        renderBacktestModelOptions();
-      }
-
-      function renderBacktestTargets(targets) {
-        const prev = btTarget.value || "";
-        const list = (targets || []).filter((t) => {
-          const h = Number(t.horizonMin);
-          return h === 5 || h === 15 || h === 60;
-        });
-        btTarget.innerHTML = "";
-        for (const t of list) {
-          const opt = document.createElement("option");
-          opt.value = t.id || "";
-          const h = Number(t.horizonMin) === 60 ? "1H" : `${Number(t.horizonMin)}M`;
-          opt.textContent = `${t.coin || "-"}-${h}`;
-          opt.setAttribute("data-horizon", String(t.horizonMin || ""));
-          btTarget.appendChild(opt);
-        }
-        btTarget.value = list.some((t) => t.id === prev) ? prev : (list[0]?.id || "");
-        syncBacktestDays();
-        renderBacktestModelOptions();
-      }
-
-      function syncBacktestDays() {
-        const selectedId = btTarget.value || "";
-        const targets = Array.isArray(fullConfig?.prediction?.targets) ? fullConfig.prediction.targets : [];
-        const target = targets.find((x) => x.id === selectedId);
-        const daysList = getBacktestDaysOptions(Number(target?.horizonMin));
-        const prev = btDays.value || "";
-        btDays.innerHTML = "";
-        for (const d of daysList) {
-          const opt = document.createElement("option");
-          opt.value = String(d);
-          opt.textContent = `${d}天`;
-          btDays.appendChild(opt);
-        }
-        btDays.value = daysList.includes(Number(prev)) ? prev : String(daysList[0] || "");
-      }
-
-      function renderBacktestResult(result) {
-        btBody.innerHTML = "";
-        if (!result || typeof result !== "object") {
-          btBody.innerHTML = '<tr><td colspan="6" class="muted">暂无回测结果</td></tr>';
-          btMaxErr.textContent = "-";
-          btMaxTradeErr.textContent = "-";
-          return;
-        }
-        const tr = document.createElement("tr");
-        const label = `${result.coin || "-"}-${result.horizonMin || "-"}M`;
-        tr.innerHTML = `
-          <td>${escapeHtml(label)}</td>
-          <td>${Number(result.sampleCount ?? 0)}</td>
-          <td>${(Number(result.predictionWinRate ?? 0) * 100).toFixed(2)}%</td>
-          <td>${Number(result.tradeCount ?? 0)}</td>
-          <td>${(Number(result.tradeWinRate ?? 0) * 100).toFixed(2)}%</td>
-          <td>${(Number(result.tradeSignalRate ?? 0) * 100).toFixed(2)}%</td>
-        `;
-        btBody.appendChild(tr);
-        btMaxErr.textContent = String(Number(result.maxConsecutivePredictionLosses ?? 0));
-        btMaxTradeErr.textContent = String(Number(result.maxConsecutiveTradeLosses ?? 0));
-      }
-
-      function renderBacktestCompare(items) {
-        btCompareBody.innerHTML = "";
-        const list = Array.isArray(items) ? items : [];
-        if (!list.length) {
-          btCompareBody.innerHTML = '<tr><td colspan="9" class="muted">暂无对比结果</td></tr>';
-          return;
-        }
-        for (const x of list) {
-          const r = x?.result || null;
-          const winRate = r ? `${(Number(r.tradeWinRate || 0) * 100).toFixed(2)}%` : "-";
-          const tradeCount = r ? String(Number(r.tradeCount || 0)) : "-";
-          const predRate = r ? `${(Number(r.predictionWinRate || 0) * 100).toFixed(2)}%` : "-";
-          const signalRate = r ? `${(Number(r.tradeSignalRate || 0) * 100).toFixed(2)}%` : "-";
-          const maxTradeLoss = r ? String(Number(r.maxConsecutiveTradeLosses || 0)) : "-";
-          const samples = r ? String(Number(r.sampleCount || 0)) : "-";
-          const status = x?.ok ? "OK" : `失败: ${String(x?.error || "-")}`;
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${x?.rank == null ? "-" : Number(x.rank)}</td>
-            <td title="${escapeHtml(String(x?.modelPath || ""))}">${escapeHtml(String(x?.modelName || x?.profileId || "-"))}</td>
-            <td>${winRate}</td>
-            <td>${tradeCount}</td>
-            <td>${predRate}</td>
-            <td>${signalRate}</td>
-            <td>${maxTradeLoss}</td>
-            <td>${samples}</td>
-            <td>${escapeHtml(status)}</td>
-          `;
-          btCompareBody.appendChild(tr);
-        }
-      }
-
-      function renderBacktestRecords() {
-        btRecordsBody.innerHTML = "";
-        if (!Array.isArray(btRecordsAll) || btRecordsAll.length === 0) {
-          btRecordsBody.innerHTML = '<tr><td colspan="11" class="muted">暂无回测明细</td></tr>';
-          btPageInfo.textContent = "";
-          btPrevBtn.disabled = true;
-          btNextBtn.disabled = true;
-          return;
-        }
-
-        const pageSize = Math.max(10, Number(btQuery.pageSize || 100));
-        const total = btRecordsAll.length;
-        const totalPages = Math.max(1, Math.ceil(total / pageSize));
-        btQuery.page = Math.min(Math.max(1, btQuery.page), totalPages);
-        const start = (btQuery.page - 1) * pageSize;
-        const pageRows = btRecordsAll.slice(start, start + pageSize);
-
-        for (const r of pageRows) {
-          const tr = document.createElement("tr");
-          const tradedText = r.traded ? "是" : "否";
-          const tradedResult = r.tradeWin == null ? "-" : (r.tradeWin ? "WIN" : "LOSE");
-          tr.innerHTML = `
-            <td>${Number(r.seq ?? 0)}</td>
-            <td>${fmtTime(r.entryTime)}</td>
-            <td>${fmtTime(r.settleTime)}</td>
-            <td>${r.predSide || "-"}</td>
-            <td>${r.actualSide || "-"}</td>
-            <td>${(Number(r.predProbUp ?? 0) * 100).toFixed(2)}%</td>
-            <td>${Number(r.edge ?? 0).toFixed(4)}</td>
-            <td>${tradedText}</td>
-            <td>${tradedResult}</td>
-            <td>${fmtNumber(r.entryPrice, 6)}</td>
-            <td>${fmtNumber(r.settlePrice, 6)}</td>
-          `;
-          btRecordsBody.appendChild(tr);
-        }
-
-        btPageInfo.textContent = `第 ${btQuery.page} / ${totalPages} 页，共 ${total} 条`;
-        btPrevBtn.disabled = btQuery.page <= 1;
-        btNextBtn.disabled = btQuery.page >= totalPages;
       }
 
       function renderTradeSummary(summary) {
@@ -1444,139 +768,162 @@
         document.getElementById("sPending").textContent = String(summary?.pendingTrades ?? 0);
         document.getElementById("sWins").textContent = String(summary?.wins ?? 0);
         document.getElementById("sLosses").textContent = String(summary?.losses ?? 0);
-        const winRate = Number(summary?.winRate ?? 0);
-        document.getElementById("sWinRate").textContent = `${(winRate * 100).toFixed(2)}%`;
+        document.getElementById("sWinRate").textContent = fmtPct(summary?.winRate ?? 0);
       }
-
-      const fmtUsd = (v, d = 4) => {
-        const n = Number(v);
-        if (!Number.isFinite(n)) return "-";
-        return `$${n.toFixed(d)}`;
-      };
 
       function renderTrades(items) {
         tradesBody.innerHTML = "";
-        if (!Array.isArray(items) || items.length === 0) {
-          const tr = document.createElement("tr");
-          tr.innerHTML = '<td colspan="7" class="muted">暂无交易记录</td>';
-          tradesBody.appendChild(tr);
+        if (!Array.isArray(items) || !items.length) {
+          tradesBody.innerHTML = '<tr><td colspan="7" class="muted">暂无交易记录</td></tr>';
           return;
         }
-
-        for (const t of items) {
+        for (const trade of items) {
           const tr = document.createElement("tr");
-          const targetLabel = t.marketTitle || t.targetId || `${t.coin || "-"}_${Number(t.horizonMin) === 60 ? "1h" : `${t.horizonMin || "-"}m`}`;
-          const marketUrl = typeof t.marketUrl === "string" ? t.marketUrl.trim() : "";
-          const safeLabel = escapeHtml(targetLabel);
-          const linkHtml = marketUrl
-            ? `<a class="market-link" href="${encodeURI(marketUrl)}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`
-            : safeLabel;
-          let badgeClass = "pending";
-          if (t.status === "WIN") badgeClass = "win";
-          if (t.status === "LOSE") badgeClass = "lose";
-          if (t.status === "CANCELED") badgeClass = "canceled";
-          const mode = t.executionMode === "DRY_RUN" ? "DRY_RUN" : "LIVE";
-          const modeClass = mode === "DRY_RUN" ? "mode-dry" : "mode-live";
-          const entryPrice = t.entryPrice == null ? null : Number(t.entryPrice);
-          const settleRef = t.settleRefPrice == null ? null : Number(t.settleRefPrice);
-          const sideText = t.side === "YES" ? "UP (YES)" : t.side === "NO" ? "DOWN (NO)" : "-";
+          const title = trade.marketTitle || trade.targetId || "-";
+          const marketUrl = String(trade.marketUrl || "").trim();
+          const titleHtml = marketUrl
+            ? `<a class="market-link" href="${encodeURI(marketUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(title)}</a>`
+            : escapeHtml(title);
+          const statusClass = trade.status === "WIN" ? "win" : trade.status === "LOSE" ? "lose" : trade.status === "CANCELED" ? "canceled" : "pending";
+          const modeClass = trade.executionMode === "LIVE" ? "mode-live" : "mode-dry";
+          const aiLabel = trade.aiDirection
+            ? `${escapeHtml(trade.aiDirection)} / ${fmtPct(trade.aiConfidence ?? 0)}`
+            : "-";
           tr.innerHTML = `
-            <td title="${safeLabel}" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${linkHtml}</td>
-            <td>${sideText}</td>
-            <td><span class="badge ${badgeClass}">${t.status || "PENDING"}</span></td>
-            <td><span class="badge ${modeClass}">${mode}</span></td>
-            <td>${entryPrice == null || !Number.isFinite(entryPrice) ? "-" : fmtUsd(entryPrice, 4)}</td>
-            <td>${settleRef == null || !Number.isFinite(settleRef) ? "-" : fmtNumber(settleRef, 6)}</td>
-            <td>${fmtTime(t.entryTime)}</td>
+            <td>${titleHtml}</td>
+            <td>${escapeHtml(trade.side || "-")}</td>
+            <td>${aiLabel}</td>
+            <td><span class="badge ${statusClass}">${escapeHtml(trade.status || "PENDING")}</span></td>
+            <td><span class="badge ${modeClass}">${escapeHtml(trade.executionMode || "DRY_RUN")}</span></td>
+            <td>${fmtNumber(trade.entryPrice, 4)}</td>
+            <td>${fmtTime(trade.entryTime)}</td>
           `;
           tradesBody.appendChild(tr);
         }
       }
 
+      function renderPredictions(items) {
+        predictionsBody.innerHTML = "";
+        if (!Array.isArray(items) || !items.length) {
+          predictionsBody.innerHTML = '<tr><td colspan="10" class="muted">暂无 AI 判定记录</td></tr>';
+          return;
+        }
+        for (const item of items) {
+          const tr = document.createElement("tr");
+          const direction = String(item?.aggregate?.direction || "ABSTAIN");
+          const dirClass = direction === "UP" ? "dir-up" : direction === "DOWN" ? "dir-down" : "dir-abstain";
+          const providerNames = Array.isArray(item?.aggregate?.providerIds) ? item.aggregate.providerIds.join(", ") : "-";
+          const providerReports = Array.isArray(item?.providerReports) ? item.providerReports : [];
+          const metaHtml = providerReports.length
+            ? providerReports.map((report, idx) => {
+                const requestMeta = report?.requestMeta;
+                if (!requestMeta) return "";
+                const label = [
+                  report?.providerLabel || report?.providerId || `provider_${idx + 1}`,
+                  requestMeta.endpoint,
+                  requestMeta.model,
+                ].filter(Boolean).join(" / ");
+                const payload = {
+                  providerId: report?.providerId || null,
+                  providerLabel: report?.providerLabel || null,
+                  latencyMs: report?.latencyMs ?? null,
+                  error: report?.error || null,
+                  request: requestMeta,
+                };
+                return `<details class="meta-details"><summary>${escapeHtml(label)}</summary><pre class="meta-pre">${escapeHtml(fmtJson(payload))}</pre></details>`;
+              }).filter(Boolean).join("")
+            : "-";
+          tr.innerHTML = `
+            <td>${fmtTime(item?.createdAt)}</td>
+            <td>${escapeHtml(item?.targetId || "-")}</td>
+            <td>${escapeHtml(item?.marketTitle || item?.marketId || "-")}</td>
+            <td>${escapeHtml(providerNames)}</td>
+            <td><span class="badge ${dirClass}">${escapeHtml(direction)}</span></td>
+            <td>${fmtPct(item?.aggregate?.probUp ?? 0)}</td>
+            <td>${fmtPct(item?.aggregate?.confidence ?? 0)}</td>
+            <td>${escapeHtml(item?.decisionAction || "-")} / ${escapeHtml(item?.decisionReason || "")}</td>
+            <td>${metaHtml}</td>
+            <td>${escapeHtml(item?.aggregate?.summary || "-")}</td>
+          `;
+          predictionsBody.appendChild(tr);
+        }
+      }
+
       function fillForm(cfg) {
         setValue("pollIntervalSec", cfg.runtime.pollIntervalSec);
-        setValue("minEdge", cfg.prediction.minEdge);
-        setValue("fixedOrderPrice", cfg.prediction.fixedOrderPrice ?? 0.45);
-        setValue("maxOrderNotionalUsd", cfg.prediction.maxOrderNotionalUsd ?? 2.5);
-        setValue("cycleStartWindowSec", cfg.prediction.cycleStartWindowSec ?? 60);
-        setValue("claimCooldownSec", cfg.runtime.claimCooldownSec || 300);
-        setValue("maxDrawdownPct", cfg.runtime.maxDrawdownPct || 0);
+        setValue("claimCooldownSec", cfg.runtime.claimCooldownSec ?? 300);
         setValue("maxOpenTrades", cfg.runtime.maxOpenTrades ?? 6);
         setValue("maxTradesPerDay", cfg.runtime.maxTradesPerDay ?? 120);
         setValue("maxConsecutiveLosses", cfg.runtime.maxConsecutiveLosses ?? 4);
-
+        setValue("maxDrawdownPct", cfg.runtime.maxDrawdownPct ?? 0);
+        setValue("factLookbackMinutes", cfg.prediction.factLookbackMinutes ?? 90);
+        setValue("minConfidence", cfg.prediction.minConfidence ?? 0.55);
+        setValue("fixedOrderPrice", cfg.prediction.fixedOrderPrice ?? 0.45);
+        setValue("maxOrderNotionalUsd", cfg.prediction.maxOrderNotionalUsd ?? 2.5);
+        setValue("systemPrompt", cfg.prediction.systemPrompt || "");
+        setValue("userPromptTemplate", cfg.prediction.userPromptTemplate || "");
         document.getElementById("dryRun").checked = Boolean(cfg.runtime.dryRun);
         document.getElementById("autoClaim").checked = Boolean(cfg.runtime.autoClaim);
+        renderTargets(cfg.prediction.targets || []);
+        renderTradeTargets(cfg.prediction.targets || []);
+        modePill.textContent = cfg.runtime.dryRun ? "当前配置: DRY_RUN" : "当前配置: LIVE";
+      }
 
-        const targets = Array.isArray(cfg.prediction.targets) ? cfg.prediction.targets : [];
-        renderTargets(targets);
-        renderTradeTargets(targets);
-        renderBacktestTargets(targets);
-        renderModelTargetOptions(targets);
-        renderModelListFilterOptions(targets);
-        if (!selectedModelProfileId && modelTarget.value) {
-          fillModelEditorByTarget(modelTarget.value);
-        }
+      function readTargets(next) {
+        const checks = document.querySelectorAll(".target-enabled");
+        checks.forEach((el) => {
+          const idx = Number(el.getAttribute("data-idx"));
+          const target = next.prediction.targets?.[idx];
+          if (!target) return;
+          target.enabled = Boolean(el.checked);
+        });
+        const symbols = document.querySelectorAll(".target-symbol");
+        symbols.forEach((el) => {
+          const idx = Number(el.getAttribute("data-idx"));
+          const target = next.prediction.targets?.[idx];
+          if (!target) return;
+          target.symbol = String(el.value || "").trim().toUpperCase() || target.symbol;
+        });
       }
 
       function readFormToConfig() {
         const next = JSON.parse(JSON.stringify(fullConfig));
-
         next.runtime.dryRun = document.getElementById("dryRun").checked;
         next.runtime.autoClaim = document.getElementById("autoClaim").checked;
         next.runtime.pollIntervalSec = Math.max(5, Math.round(num("pollIntervalSec", next.runtime.pollIntervalSec || 20)));
         next.runtime.claimCooldownSec = Math.max(30, Math.round(num("claimCooldownSec", next.runtime.claimCooldownSec || 300)));
-        next.runtime.maxDrawdownPct = Math.max(0, num("maxDrawdownPct", next.runtime.maxDrawdownPct || 0));
         next.runtime.maxOpenTrades = Math.max(0, Math.round(num("maxOpenTrades", next.runtime.maxOpenTrades ?? 6)));
         next.runtime.maxTradesPerDay = Math.max(0, Math.round(num("maxTradesPerDay", next.runtime.maxTradesPerDay ?? 120)));
         next.runtime.maxConsecutiveLosses = Math.max(0, Math.round(num("maxConsecutiveLosses", next.runtime.maxConsecutiveLosses ?? 4)));
+        next.runtime.maxDrawdownPct = Math.max(0, num("maxDrawdownPct", next.runtime.maxDrawdownPct ?? 0));
 
-        next.prediction.minEdge = Math.max(0, num("minEdge", next.prediction.minEdge || 0.02));
+        next.prediction.factLookbackMinutes = Math.max(30, Math.round(num("factLookbackMinutes", next.prediction.factLookbackMinutes ?? 90)));
+        next.prediction.minConfidence = Math.max(0, Math.min(1, num("minConfidence", next.prediction.minConfidence ?? 0.55)));
         const fixedOrderPriceRaw = num("fixedOrderPrice", next.prediction.fixedOrderPrice ?? 0.45);
-        const fixedOrderPrice = fixedOrderPriceRaw > 1 && fixedOrderPriceRaw <= 100
-          ? fixedOrderPriceRaw / 100
-          : fixedOrderPriceRaw;
-        next.prediction.fixedOrderPrice = Math.max(0.01, Math.min(0.99, fixedOrderPrice));
+        next.prediction.fixedOrderPrice = Math.max(0.01, Math.min(0.99, fixedOrderPriceRaw > 1 && fixedOrderPriceRaw <= 100 ? fixedOrderPriceRaw / 100 : fixedOrderPriceRaw));
         next.prediction.maxOrderNotionalUsd = Math.max(0.1, num("maxOrderNotionalUsd", next.prediction.maxOrderNotionalUsd ?? 2.5));
-        next.prediction.cycleStartWindowSec = Math.max(10, Math.round(num("cycleStartWindowSec", next.prediction.cycleStartWindowSec ?? 60)));
-        // prune obsolete knobs from old strategy mode
-        delete next.prediction.baseBetUsd;
-        delete next.prediction.maxBetUsd;
-        delete next.prediction.minOrderShares;
-        delete next.prediction.priceAggression;
-        delete next.prediction.minEntryPrice;
-        delete next.prediction.maxEntryPrice;
-        delete next.prediction.minOverround;
-        delete next.prediction.maxOverround;
-        delete next.prediction.enableReverseFallback;
-        delete next.prediction.reverseMinEntrySeconds;
-        delete next.prediction.reverseMinModelProb;
-        delete next.prediction.reverseMinEdgeMultiplier;
+        next.prediction.systemPrompt = String(document.getElementById("systemPrompt").value || "").trim();
+        next.prediction.userPromptTemplate = String(document.getElementById("userPromptTemplate").value || "").trim();
 
-        delete next.marketFilter.cooldownSeconds;
-        delete next.marketFilter.minEntrySeconds;
-
-        const checks = document.querySelectorAll(".target-enabled");
-        checks.forEach((el) => {
-          const targetId = String(el.getAttribute("data-target-id") || "").trim();
-          if (!targetId) return;
-          const t = (next.prediction.targets || []).find((x) => String(x?.id || "").trim() === targetId);
-          if (!t) return;
-          t.enabled = Boolean(el.checked);
-        });
-        const modelSelects = document.querySelectorAll(".target-model");
-        modelSelects.forEach((el) => {
-          const targetId = String(el.getAttribute("data-target-id") || "").trim();
-          if (!targetId) return;
-          const t = (next.prediction.targets || []).find((x) => String(x?.id || "").trim() === targetId);
-          if (!t) return;
-          const modelPath = String(el.value || "").trim();
-          if (modelPath) {
-            t.modelPath = modelPath;
-          }
-        });
+        readTargets(next);
 
         return next;
+      }
+
+      async function loadProvider() {
+        try {
+          providersStatus.textContent = "从 .env 读取中...";
+          const resp = await fetch("/api/provider");
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          const provider = data?.provider || null;
+          renderProvider(provider);
+          providersStatus.textContent = provider
+            ? "当前单模型配置已从 .env 载入"
+            : "当前未从 .env 读取到模型配置";
+        } catch (err) {
+          providersStatus.textContent = `读取失败: ${String(err)}`;
+        }
       }
 
       async function loadConfig() {
@@ -1597,239 +944,33 @@
         if (!fullConfig) return;
         cfgStatus.textContent = "保存中...";
         try {
-          const next = readFormToConfig();
+          const payload = readFormToConfig();
           const resp = await fetch("/api/config", {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(next),
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-
-          await loadConfig();
-          await loadModelProfiles();
-          cfgStatus.textContent = `已保存，bot 将在下一轮自动重载（token=${data.reloadToken || "-"}）`;
-        } catch (err) {
-          cfgStatus.textContent = `保存失败: ${String(err)}`;
-        }
-      }
-
-      async function runBacktest() {
-        const targetId = String(btTarget.value || "").trim();
-        const days = Number(btDays.value || "0");
-        const profileId = String(btModel.value || "").trim();
-        if (!targetId) {
-          btStatus.textContent = "请选择回测盘口";
-          return;
-        }
-        if (!Number.isFinite(days) || days <= 0) {
-          btStatus.textContent = "请选择有效回测周期";
-          return;
-        }
-
-        try {
-          runBacktestBtn.disabled = true;
-          btStatus.textContent = "回测运行中...";
-          btQuery.page = 1;
-          const resp = await fetch("/api/backtest/run", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ targetId, days, profileId }),
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          renderBacktestResult(data?.result || null);
-          btRecordsAll = Array.isArray(data?.records) ? data.records : [];
-          renderBacktestRecords();
-          const summary = data?.result
-            ? `完成: 样本${data.result.sampleCount}, 交易${data.result.tradeCount}, 交易胜率${(Number(data.result.tradeWinRate || 0) * 100).toFixed(2)}%, 最大连续错误${Number(data.result.maxConsecutivePredictionLosses || 0)}`
-            : "完成";
-          btStatus.textContent = summary;
-        } catch (err) {
-          btRecordsAll = [];
-          renderBacktestRecords();
-          btStatus.textContent = `回测失败: ${String(err)}`;
-        } finally {
-          runBacktestBtn.disabled = false;
-        }
-      }
-
-      async function runBacktestCompare() {
-        const targetId = String(btTarget.value || "").trim();
-        const days = Number(btDays.value || "0");
-        if (!targetId) {
-          btCompareStatus.textContent = "请选择回测盘口";
-          return;
-        }
-        if (!Number.isFinite(days) || days <= 0) {
-          btCompareStatus.textContent = "请选择有效回测周期";
-          return;
-        }
-        try {
-          runBacktestCompareBtn.disabled = true;
-          btCompareStatus.textContent = "模型对比运行中...";
-          btCompareItems = [];
-          renderBacktestCompare(btCompareItems);
-          const includeDefault = Boolean(btCompareDefault?.checked);
-          const resp = await fetch("/api/backtest/compare", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ targetId, days, includeDefault }),
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          btCompareItems = Array.isArray(data?.items) ? data.items : [];
-          renderBacktestCompare(btCompareItems);
-          const okCount = btCompareItems.filter((x) => x?.ok).length;
-          btCompareStatus.textContent = `对比完成: 总${btCompareItems.length}，成功${okCount}`;
-        } catch (err) {
-          btCompareItems = [];
-          renderBacktestCompare(btCompareItems);
-          btCompareStatus.textContent = `对比失败: ${String(err)}`;
-        } finally {
-          runBacktestCompareBtn.disabled = false;
-        }
-      }
-
-      async function loadModelProfiles() {
-        try {
-          modelsStatus.textContent = "模型加载中...";
-          const resp = await fetch("/api/models/profiles");
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          const list = Array.isArray(data?.profiles) ? data.profiles : [];
-          renderModelProfiles(list);
-          const targets = Array.isArray(fullConfig?.prediction?.targets) ? fullConfig.prediction.targets : [];
-          if (targets.length > 0) {
-            renderTargets(targets);
-          }
-          modelsStatus.textContent = `模型数量 ${list.length}`;
-        } catch (err) {
-          modelsStatus.textContent = `加载失败: ${String(err)}`;
-        }
-      }
-
-      async function initModelProfiles() {
-        try {
-          modelsStatus.textContent = "初始化中...";
-          const resp = await fetch("/api/models/init", { method: "POST" });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          renderModelProfiles(Array.isArray(data?.profiles) ? data.profiles : []);
-          modelsStatus.textContent = "默认模型初始化完成";
-        } catch (err) {
-          modelsStatus.textContent = `初始化失败: ${String(err)}`;
-        }
-      }
-
-      async function saveModelProfile() {
-        try {
-          modelEditorStatus.textContent = "保存中...";
-          const payload = {
-            id: selectedModelProfileId || undefined,
-            targetId: String(modelTarget.value || "").trim(),
-            name: String(modelName.value || "").trim(),
-            trainDays: Number(modelTrainDays.value || "0"),
-            lookbackMin: Number(modelLookback.value || "0"),
-            stepMin: Number(modelStep.value || "0"),
-            valDays: Number(modelValDays.value || "0"),
-            epochs: Number(modelEpochs.value || "0"),
-            learningRate: Number(modelLr.value || "0"),
-            l2: Number(modelL2.value || "0"),
-            patience: Number(modelPatience.value || "0"),
-            modelPath: String(modelPath.value || "").trim(),
-          };
-          if (!payload.targetId) {
-            throw new Error("targetId 不能为空");
-          }
-          const resp = await fetch("/api/models/profile", {
-            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          selectedModelProfileId = data?.profile?.id || selectedModelProfileId;
-          modelEditorStatus.textContent = "保存成功";
-          await loadModelProfiles();
+          fullConfig = payload;
+          fillForm(payload);
+          cfgStatus.textContent = `已保存，下一轮自动生效（reload=${data?.reloadToken || "-"}）`;
         } catch (err) {
-          modelEditorStatus.textContent = `保存失败: ${String(err)}`;
-        }
-      }
-
-      async function trainCurrentModel() {
-        try {
-          if (!selectedModelProfileId) {
-            throw new Error("请先选择模型");
-          }
-          modelsStatus.textContent = "训练中...";
-          const resp = await fetch("/api/models/train", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ profileId: selectedModelProfileId }),
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          modelsStatus.textContent = `训练完成: ${data?.profile?.name || selectedModelProfileId}`;
-          await loadModelProfiles();
-        } catch (err) {
-          modelsStatus.textContent = `训练失败: ${String(err)}`;
-        }
-      }
-
-      function startNewModelDraft() {
-        const targetId = String(modelTarget.value || "").trim() || String(modelListFilterTargetId || "").trim();
-        selectedModelProfileId = "";
-        document.querySelectorAll('input[name="modelPick"]').forEach((el) => {
-          if (el instanceof HTMLInputElement) el.checked = false;
-        });
-        if (targetId) {
-          fillModelEditorByTarget(targetId);
-        }
-        modelEditorStatus.textContent = "新建模型草稿（未保存）";
-      }
-
-      async function deleteModelProfile(profileId) {
-        const id = String(profileId || "").trim();
-        if (!id) return;
-        const picked = modelProfiles.find((p) => p.id === id);
-        const name = picked?.name || id;
-        const ok = window.confirm(`确认删除模型 ${name} ?\n将同时删除模型配置，并尝试删除模型文件。`);
-        if (!ok) return;
-        try {
-          modelsStatus.textContent = `删除中: ${name}...`;
-          const resp = await fetch("/api/models/delete", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ profileId: id, deleteModelFile: true }),
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          if (selectedModelProfileId === id) {
-            selectedModelProfileId = "";
-          }
-          renderModelProfiles(Array.isArray(data?.profiles) ? data.profiles : []);
-          const removed = data?.deleted?.modelFileDeleted ? "，模型文件已删除" : "";
-          modelsStatus.textContent = `删除成功: ${name}${removed}`;
-        } catch (err) {
-          modelsStatus.textContent = `删除失败: ${String(err)}`;
+          cfgStatus.textContent = `保存失败: ${String(err)}`;
         }
       }
 
       async function loadTrades() {
         try {
-          tradeStatus.textContent = "加载中...";
           const query = new URLSearchParams({
             page: String(tradeQuery.page),
             pageSize: String(tradeQuery.pageSize),
           });
           if (tradeQuery.targetId) query.set("targetId", tradeQuery.targetId);
           if (tradeQuery.resolved) query.set("resolved", tradeQuery.resolved);
-
           const resp = await fetch(`/api/trades?${query.toString()}`);
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-
           renderTradeSummary(data.summary || {});
           renderTrades(data.items || []);
           tradePageInfo.textContent = `第 ${data.pagination.page} / ${data.pagination.totalPages} 页，共 ${data.pagination.total} 条`;
@@ -1843,6 +984,8 @@
       }
 
       async function clearTrades() {
+        const ok = window.confirm("确认清空交易记录并重置 tradedMarkets ?");
+        if (!ok) return;
         try {
           tradeStatus.textContent = "清空中...";
           const resp = await fetch("/api/trades/clear", { method: "POST" });
@@ -1850,15 +993,48 @@
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           tradeQuery.page = 1;
           await loadTrades();
-          tradeStatus.textContent = `交易记录已清空 ${new Date().toLocaleTimeString()}`;
         } catch (err) {
           tradeStatus.textContent = `清空失败: ${String(err)}`;
         }
       }
 
+      async function loadPredictions() {
+        try {
+          const limit = Number(predictionLimit.value || "50");
+          const resp = await fetch(`/api/predictions?limit=${encodeURIComponent(limit)}`);
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          renderPredictions(data.items || []);
+          predictionStatus.textContent = `更新于 ${new Date().toLocaleTimeString()}`;
+        } catch (err) {
+          predictionStatus.textContent = `读取失败: ${String(err)}`;
+        }
+      }
+
+      async function clearPredictions() {
+        const ok = window.confirm("确认清空 AI 判定记录？");
+        if (!ok) return;
+        try {
+          predictionStatus.textContent = "清空中...";
+          const resp = await fetch("/api/predictions/clear", { method: "POST" });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          await loadPredictions();
+        } catch (err) {
+          predictionStatus.textContent = `清空失败: ${String(err)}`;
+        }
+      }
+
+      function formatAccountText(data) {
+        const equity = Number(data?.totalEquityUsd ?? 0);
+        const collateral = Number(data?.collateralUsdc ?? 0);
+        const user = data?.user || "-";
+        const text = `总资产≈$${equity.toFixed(2)} | 可用USDC≈$${collateral.toFixed(2)} | ${user}`;
+        return data?.collateralError ? `${text} | ${data.collateralError}` : text;
+      }
+
       async function loadAccount() {
         try {
-          balanceInfo.textContent = "余额加载中...";
           const resp = await fetch("/api/account");
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
@@ -1868,27 +1044,14 @@
         }
       }
 
-      function formatAccountText(data) {
-        const equity = Number(data?.totalEquityUsd ?? 0);
-        const collateral = Number(data?.collateralUsdc ?? 0);
-        const user = data?.user || "-";
-        const msg = `当前总资产≈$${equity.toFixed(2)} (可用USDC≈$${collateral.toFixed(2)}) | ${user}`;
-        return data?.collateralError ? `${msg} | ${data.collateralError}` : msg;
-      }
-
       async function claimRewards() {
-        if (!claimBalanceBtn) return;
         try {
           claimBalanceBtn.disabled = true;
           balanceInfo.textContent = "赎回执行中...";
           const resp = await fetch("/api/account/claim", { method: "POST" });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          const claim = data?.claim || {};
-          const reason = claim?.reason ? `, ${claim.reason}` : "";
-          const accountText = formatAccountText(data?.account || {});
-          balanceInfo.textContent = `${accountText} | 赎回: 成功${claim?.success ?? 0}/失败${claim?.failed ?? 0}, 条件${claim?.conditions ?? 0}${reason}`;
-          tradeQuery.page = 1;
+          balanceInfo.textContent = `${formatAccountText(data.account || {})} | 赎回: 成功${data?.claim?.success ?? 0}/失败${data?.claim?.failed ?? 0}`;
           await loadTrades();
         } catch (err) {
           balanceInfo.textContent = `赎回失败: ${String(err)}`;
@@ -1902,6 +1065,7 @@
           const tail = Number(tailInput.value || "200");
           const resp = await fetch(`/api/logs?tail=${encodeURIComponent(tail)}`);
           const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           logArea.textContent = Array.isArray(data.lines) ? data.lines.join("\n") : "";
           logArea.scrollTop = logArea.scrollHeight;
           logStatus.textContent = `更新于 ${new Date().toLocaleTimeString()}`;
@@ -1916,61 +1080,65 @@
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           await loadLogs();
-          logStatus.textContent = `日志已清空 ${new Date().toLocaleTimeString()}`;
         } catch (err) {
           logStatus.textContent = `清空失败: ${String(err)}`;
         }
       }
 
+      function updateScanControl(view) {
+        const effectiveScanning = Boolean(view?.effectiveScanning);
+        scanDot.classList.toggle("on", effectiveScanning);
+        scanTitle.innerHTML = `<strong>${effectiveScanning ? "扫描中" : "已暂停"}</strong>`;
+        scanMeta.textContent = `${view?.mode || "-"} | switchEnabled=${view?.switchEnabled ? "yes" : "no"} | updatedBy=${view?.updatedBy || "-"} | ${fmtTime(view?.updatedAt)}`;
+        scanToggleBtn.disabled = !view?.switchEnabled;
+        scanToggleBtn.textContent = effectiveScanning ? "停止扫描" : "开始扫描";
+      }
+
+      async function loadBotControl() {
+        try {
+          const resp = await fetch("/api/bot/control");
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          updateScanControl(data);
+        } catch (err) {
+          scanTitle.textContent = `状态读取失败: ${String(err)}`;
+        }
+      }
+
+      async function toggleBotControl() {
+        try {
+          const currentOn = scanDot.classList.contains("on");
+          const resp = await fetch("/api/bot/control", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ scanningEnabled: !currentOn }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          updateScanControl(data);
+        } catch (err) {
+          scanMeta.textContent = `切换失败: ${String(err)}`;
+        }
+      }
+
       document.getElementById("loadBtn").addEventListener("click", async () => {
         await loadConfig();
-        await loadModelProfiles();
+        await loadProvider();
         tradeQuery.page = 1;
         await loadTrades();
+        await loadPredictions();
       });
       document.getElementById("saveBtn").addEventListener("click", saveConfig);
-      document.getElementById("refreshLogBtn").addEventListener("click", loadLogs);
-      document.getElementById("clearLogBtn").addEventListener("click", clearLogs);
-      document.getElementById("refreshTradesBtn").addEventListener("click", loadTrades);
-      document.getElementById("clearTradesBtn").addEventListener("click", clearTrades);
       document.getElementById("refreshBalanceBtn").addEventListener("click", loadAccount);
       document.getElementById("claimBalanceBtn").addEventListener("click", claimRewards);
-      scanToggleBtn.addEventListener("click", toggleBotControl);
+      document.getElementById("refreshTradesBtn").addEventListener("click", loadTrades);
+      document.getElementById("clearTradesBtn").addEventListener("click", clearTrades);
+      document.getElementById("refreshPredictionsBtn").addEventListener("click", loadPredictions);
+      document.getElementById("clearPredictionsBtn").addEventListener("click", clearPredictions);
+      document.getElementById("refreshLogBtn").addEventListener("click", loadLogs);
+      document.getElementById("clearLogBtn").addEventListener("click", clearLogs);
       scanRefreshBtn.addEventListener("click", loadBotControl);
-      document.getElementById("runBacktestBtn").addEventListener("click", runBacktest);
-      runBacktestCompareBtn.addEventListener("click", runBacktestCompare);
-      refreshModelsBtn.addEventListener("click", loadModelProfiles);
-      initModelsBtn.addEventListener("click", initModelProfiles);
-      trainModelBtn.addEventListener("click", trainCurrentModel);
-      newModelBtn.addEventListener("click", startNewModelDraft);
-      saveModelBtn.addEventListener("click", saveModelProfile);
-      tabButtons.forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const tab = btn.getAttribute("data-tab") || "runtime";
-          setActiveTab(tab);
-        });
-      });
-
-      btTarget.addEventListener("change", () => {
-        syncBacktestDays();
-        renderBacktestModelOptions();
-        btCompareItems = [];
-        renderBacktestCompare(btCompareItems);
-        btCompareStatus.textContent = "";
-      });
-      btPageSize.addEventListener("change", () => {
-        btQuery.pageSize = Math.max(10, Number(btPageSize.value || "100"));
-        btQuery.page = 1;
-        renderBacktestRecords();
-      });
-      btPrevBtn.addEventListener("click", () => {
-        btQuery.page = Math.max(1, btQuery.page - 1);
-        renderBacktestRecords();
-      });
-      btNextBtn.addEventListener("click", () => {
-        btQuery.page += 1;
-        renderBacktestRecords();
-      });
+      scanToggleBtn.addEventListener("click", toggleBotControl);
 
       tradeTarget.addEventListener("change", async () => {
         tradeQuery.targetId = tradeTarget.value || "";
@@ -1995,51 +1163,26 @@
         tradeQuery.page += 1;
         await loadTrades();
       });
+      predictionLimit.addEventListener("change", loadPredictions);
 
-      modelTarget.addEventListener("change", () => {
-        const targetId = String(modelTarget.value || "").trim();
-        if (!targetId) return;
-        const picked = modelProfiles.find((p) => p.id === selectedModelProfileId);
-        if (picked && picked.targetId === targetId) return;
-        selectedModelProfileId = "";
-        fillModelEditorByTarget(targetId);
-      });
-      modelListFilter.addEventListener("change", () => {
-        modelListFilterTargetId = String(modelListFilter.value || "").trim();
-        renderModelProfiles(modelProfiles);
-      });
-      modelsBody.addEventListener("click", (e) => {
-        const el = e.target;
-        if (!(el instanceof HTMLElement)) return;
-        const btn = el.closest(".model-delete");
-        if (!(btn instanceof HTMLButtonElement)) return;
-        const profileId = String(btn.getAttribute("data-profile-id") || "").trim();
-        void deleteModelProfile(profileId);
-      });
-      modelsBody.addEventListener("change", (e) => {
-        const el = e.target;
-        if (!(el instanceof HTMLInputElement)) return;
-        if (el.name !== "modelPick") return;
-        selectedModelProfileId = String(el.value || "");
-        const picked = modelProfiles.find((p) => p.id === selectedModelProfileId);
-        if (picked) {
-          fillModelEditor(picked);
-          modelEditorStatus.textContent = `已选中 ${picked.name || picked.id}`;
-        }
+      document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => setActiveTab(btn.getAttribute("data-tab") || "runtime"));
       });
 
       (async () => {
         setActiveTab(activeTab);
         await loadConfig();
-        await loadModelProfiles();
+        await loadProvider();
         await loadTrades();
+        await loadPredictions();
         await loadAccount();
         await loadBotControl();
         await loadLogs();
-        setInterval(loadLogs, 2000);
         setInterval(loadTrades, 5000);
+        setInterval(loadPredictions, 6000);
         setInterval(loadAccount, 10000);
         setInterval(loadBotControl, 4000);
+        setInterval(loadLogs, 2500);
       })();
     </script>
   </body>

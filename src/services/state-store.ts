@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { BotState, LiveTradeRecord } from "../types.js";
+import type { BotState, LiveTradeRecord, PredictionAuditRecord } from "../types.js";
 import { isoNow } from "../utils.js";
 
 type TradeModeFilter = "LIVE" | "DRY_RUN" | "ALL";
@@ -21,16 +21,17 @@ export class StateStore {
 
   load(): BotState {
     try {
-      if (!fs.existsSync(this.filePath)) return { tradedMarkets: {}, trades: [] };
+      if (!fs.existsSync(this.filePath)) return { tradedMarkets: {}, trades: [], predictions: [] };
       const raw = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as BotState;
       return {
         tradedMarkets: parsed.tradedMarkets ?? {},
         lastTradeAt: parsed.lastTradeAt,
         trades: parsed.trades ?? [],
+        predictions: parsed.predictions ?? [],
       };
     } catch {
-      return { tradedMarkets: {}, trades: [] };
+      return { tradedMarkets: {}, trades: [], predictions: [] };
     }
   }
 
@@ -64,6 +65,29 @@ export class StateStore {
     state.lastTradeAt = isoNow();
     state.trades = state.trades ?? [];
     state.trades.push(trade);
+    this.save(state);
+  }
+
+  recordPrediction(prediction: PredictionAuditRecord, maxItems = 300): void {
+    const state = this.load();
+    state.predictions = state.predictions ?? [];
+    state.predictions.push(prediction);
+    if (state.predictions.length > maxItems) {
+      state.predictions = state.predictions.slice(-maxItems);
+    }
+    this.save(state);
+  }
+
+  listPredictions(limit = 100): PredictionAuditRecord[] {
+    const state = this.load();
+    const predictions = [...(state.predictions ?? [])];
+    predictions.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    return predictions.slice(0, Math.max(1, limit));
+  }
+
+  clearPredictions(): void {
+    const state = this.load();
+    state.predictions = [];
     this.save(state);
   }
 

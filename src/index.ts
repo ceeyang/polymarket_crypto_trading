@@ -5,14 +5,16 @@ import axios from "axios";
 import { Wallet } from "ethers";
 
 import { MAX_TARGETS, loadConfig, readRuntimeConfig, type Config, type MarketTarget } from "./config.js";
-import { BinanceClient } from "./clients/binance.js";
+import { BinanceClient, type BinanceCandle } from "./clients/binance.js";
 import { GammaClient } from "./clients/gamma.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
 import { makeDecision } from "./strategy/decision.js";
-import { loadTrainedModel, predictWithTrainedModel, type TrainedModelArtifact } from "./strategy/trained-model.js";
+import { predictWithProviders } from "./services/ai-predictor.js";
 import { readBotControlState, resolveBotControlMode, type BotControlMode, writeBotControlState } from "./services/bot-control.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
+import { buildMarketFactPack } from "./services/market-facts.js";
 import { StateStore } from "./services/state-store.js";
+import type { Prediction, PredictionAuditRecord, SelectedMarket } from "./types.js";
 import { sleep } from "./utils.js";
 
 const LOG_FILE = path.resolve("state", "runtime.log");
@@ -42,7 +44,7 @@ function log(msg: string, obj?: unknown) {
 }
 
 function targetLabel(t: MarketTarget): string {
-  return `${t.coin}_${t.horizonMin === 60 ? "1h" : `${t.horizonMin}m`}`;
+  return `${t.coin}_${t.horizonMin}m`;
 }
 
 function isCurrentWindowByEnd(endDate: string, horizonMin: number, nowMs = Date.now()): { ok: boolean; minsToEnd: number; alignDiffMs: number } {
@@ -61,21 +63,12 @@ function isCurrentWindowByEnd(endDate: string, horizonMin: number, nowMs = Date.
 function withTargetOverrides(cfg: Config, target: MarketTarget): Config {
   return {
     ...cfg,
-    lookbackMinutes: target.lookbackMinutes ?? cfg.lookbackMinutes,
-    minEdge: target.minEdge ?? cfg.minEdge,
-    baseBetUsd: target.baseBetUsd ?? cfg.baseBetUsd,
-    maxBetUsd: target.maxBetUsd ?? cfg.maxBetUsd,
-    minOrderShares: target.minOrderShares ?? cfg.minOrderShares,
-    priceAggression: target.priceAggression ?? cfg.priceAggression,
+    horizonMin: target.horizonMin,
   };
 }
 
 function resolveSymbol(target: MarketTarget): string {
   return (target.symbol || `${target.coin}USDT`).toUpperCase();
-}
-
-function resolveModelPath(cfg: Config, target: MarketTarget): string {
-  return target.modelPath?.trim() ? target.modelPath : cfg.trainedModelPath;
 }
 
 function rawUsdcToNumber(raw: unknown): number {
@@ -657,7 +650,7 @@ function startOfLocalDayIso(now = new Date()): string {
   return d.toISOString();
 }
 
-function pruneCycleOrderLocks(locks: Map<string, number>, nowMs = Date.now()): void {
+function pruneExpiredCycleLocks(locks: Map<string, number>, nowMs = Date.now()): void {
   for (const [key, expireMs] of locks.entries()) {
     if (!Number.isFinite(expireMs) || expireMs <= nowMs) {
       locks.delete(key);
@@ -665,27 +658,25 @@ function pruneCycleOrderLocks(locks: Map<string, number>, nowMs = Date.now()): v
   }
 }
 
-function cycleOrderLockExpireMs(endDate: string): number {
+function cycleLockExpireMs(endDate: string): number {
   const settleMs = Date.parse(endDate);
   if (Number.isFinite(settleMs) && settleMs > 0) return settleMs;
   return Date.now() + 15 * 60_000;
+}
+
+function predictionAuditId(targetId: string, marketId: string): string {
+  return `${Date.now()}_${targetId}_${marketId}`;
+}
+
+function pickLookbackSize(cfg: Config): number {
+  return Math.max(60, cfg.factLookbackMinutes);
 }
 
 interface PreparedOrder {
   target: MarketTarget;
   label: string;
   symbol: string;
-  best: {
-    marketId: string;
-    conditionId: string;
-    title: string;
-    endDate: string;
-    liquidity: number;
-    yesPrice: number;
-    noPrice: number;
-    tickSize: number;
-    negRisk: boolean;
-  };
+  best: SelectedMarket;
   decision: {
     side: "YES" | "NO";
     tokenId: string;
@@ -693,13 +684,15 @@ interface PreparedOrder {
     shareSize: number;
     edge: number;
   };
-  pred: {
-    probUp: number;
-    confidence: number;
-    modelScore: number;
-    modelName?: string;
-  };
+  pred: Prediction;
   entryRefPrice: number;
+  audit: PredictionAuditRecord;
+}
+
+interface PreparedEvaluation {
+  audit: PredictionAuditRecord;
+  order: PreparedOrder | null;
+  cycleLockUntilMs: number;
 }
 
 interface RuntimeContext {
@@ -709,40 +702,10 @@ interface RuntimeContext {
   gamma: GammaClient;
   trader: PolymarketTrader;
   activeTargets: MarketTarget[];
-  targetModels: Map<string, TrainedModelArtifact>;
 }
 
 export interface StartBotOptions {
   controlMode?: BotControlMode;
-}
-
-function loadTargetModels(cfg: Config, targets: MarketTarget[]): Map<string, TrainedModelArtifact> {
-  const models = new Map<string, TrainedModelArtifact>();
-  for (const t of targets) {
-    const modelPath = resolveModelPath(cfg, t);
-    const model = loadTrainedModel(modelPath);
-    if (!model) {
-      log(`[${targetLabel(t)}] model missing; target disabled this run`, { modelPath });
-      continue;
-    }
-    const symbol = resolveSymbol(t);
-    const mismatch: Record<string, string> = {};
-    if (model.symbol?.toUpperCase?.() !== symbol) {
-      mismatch.modelSymbol = String(model.symbol);
-      mismatch.targetSymbol = symbol;
-    }
-    if (Number(model.horizonMin) !== Number(t.horizonMin)) {
-      mismatch.modelHorizonMin = String(model.horizonMin);
-      mismatch.targetHorizonMin = String(t.horizonMin);
-    }
-    if (Object.keys(mismatch).length > 0) {
-      log(`[${targetLabel(t)}] model mismatch; target disabled this run`, { modelPath, ...mismatch });
-      continue;
-    }
-    models.set(t.id, model);
-    log(`[${targetLabel(t)}] model loaded`, { modelPath, metrics: model.metrics ?? {} });
-  }
-  return models;
 }
 
 function readConfigKey(): string {
@@ -778,11 +741,8 @@ async function buildRuntimeContext(cfgKey: string, reloadToken: number): Promise
   if (enabledTargets.length === 0) {
     throw new Error("No enabled targets in config.prediction.targets");
   }
-
-  const targetModels = loadTargetModels(cfg, enabledTargets);
-  const activeTargets = enabledTargets.filter((t) => targetModels.has(t.id));
-  if (activeTargets.length === 0) {
-    throw new Error("No active targets with valid models");
+  if (!cfg.provider.model || !cfg.provider.baseUrl) {
+    throw new Error("AI model configuration is incomplete in environment variables");
   }
 
   return {
@@ -791,8 +751,7 @@ async function buildRuntimeContext(cfgKey: string, reloadToken: number): Promise
     reloadToken,
     gamma,
     trader,
-    activeTargets,
-    targetModels,
+    activeTargets: enabledTargets,
   };
 }
 
@@ -801,7 +760,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   const binance = new BinanceClient();
   const state = new StateStore();
   const sessionStartedAt = new Date().toISOString();
-  const targetCycleLocks = new Map<string, number>();
+  const targetAnalysisLocks = new Map<string, number>();
   let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
   let autoClaimInFlight = false;
@@ -840,7 +799,6 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         coin: x.coin,
         horizonMin: x.horizonMin,
         symbol: resolveSymbol(x),
-        modelPath: resolveModelPath(next.cfg, x),
       })));
       return next;
     } catch (err) {
@@ -869,8 +827,8 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   while (true) {
     try {
       const currentRuntime = await reloadRuntime("round_begin");
-      const { cfg, gamma, trader, activeTargets, targetModels } = currentRuntime;
-      pruneCycleOrderLocks(targetCycleLocks);
+      const { cfg, gamma, trader, activeTargets } = currentRuntime;
+      pruneExpiredCycleLocks(targetAnalysisLocks);
 
       if (!cfg.dryRun) {
         const liveSync = await syncLiveOrdersAndCancelStale(state, trader);
@@ -1044,9 +1002,8 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
           target,
           label: targetLabel(target),
           symbol: resolveSymbol(target),
-          model: targetModels.get(target.id)!,
           mergedCfg,
-          lookback: Math.max(80, mergedCfg.lookbackMinutes),
+          lookback: pickLookbackSize(mergedCfg),
         };
       });
 
@@ -1055,15 +1012,23 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         const prev = symbolMaxLookback.get(ctx.symbol) ?? 0;
         if (ctx.lookback > prev) symbolMaxLookback.set(ctx.symbol, ctx.lookback);
       }
-      const closesPromises = new Map<string, Promise<number[]>>();
+      const candlesPromises = new Map<string, Promise<{ candles: BinanceCandle[]; error?: string }>>();
       for (const [symbol, lookback] of symbolMaxLookback.entries()) {
-        closesPromises.set(symbol, binance.getCloses(symbol, "1m", lookback));
+        candlesPromises.set(
+          symbol,
+          binance.getRecentCandles(symbol, "1m", lookback)
+            .then((candles) => ({ candles }))
+            .catch((err) => ({
+              candles: [],
+              error: err instanceof Error ? err.message : String(err),
+            })),
+        );
       }
 
-      const prepared = await Promise.all(activeContexts.map(async (ctx): Promise<PreparedOrder | null> => {
-        const { target, label, model, symbol, mergedCfg } = ctx;
+      const evaluations = await Promise.all(activeContexts.map(async (ctx): Promise<PreparedEvaluation | null> => {
+        const { target, label, symbol, mergedCfg } = ctx;
         try {
-          if (targetCycleLocks.has(target.id)) {
+          if (targetAnalysisLocks.has(target.id)) {
             return null;
           }
           const markets = await gamma.getCandidateMarketsForTarget(target, 500);
@@ -1081,33 +1046,74 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             return null;
           }
 
-          const closesAll = await closesPromises.get(symbol)!;
-          const closes = closesAll.slice(-ctx.lookback);
-          const pred = predictWithTrainedModel(closes, model);
-          if (!pred) {
-            log(`[${label}] skip: prediction failed`);
+          const candleResult = await candlesPromises.get(symbol)!;
+          if (candleResult.error) {
+            log(`[${label}] skip: market facts fetch failed`, {
+              symbol,
+              error: candleResult.error,
+            });
             return null;
           }
 
-          const decision = makeDecision(pred, best, mergedCfg, target.horizonMin);
-          if (decision.action === "SKIP" || !decision.side || !decision.tokenId || !decision.limitPrice || !decision.shareSize) {
+          const candlesAll = candleResult.candles;
+          const candles = candlesAll.slice(-ctx.lookback);
+          if (candles.length < 30) {
+            log(`[${label}] skip: insufficient market facts`, { candles: candles.length });
             return null;
+          }
+
+          const facts = buildMarketFactPack({
+            target,
+            market: best,
+            candles,
+            fixedOrderPrice: mergedCfg.fixedOrderPrice,
+          });
+          const aiResult = await predictWithProviders(mergedCfg, facts);
+          const pred = aiResult.aggregate;
+          const decision = makeDecision(pred, best, mergedCfg, target.horizonMin);
+          const audit: PredictionAuditRecord = {
+            id: predictionAuditId(target.id, best.marketId),
+            createdAt: new Date().toISOString(),
+            targetId: target.id,
+            coin: target.coin,
+            symbol,
+            horizonMin: target.horizonMin,
+            marketId: best.marketId,
+            marketTitle: best.title,
+            decisionAction: decision.action,
+            decisionReason: decision.reason,
+            aggregate: pred,
+            facts,
+            providerReports: aiResult.providerReports,
+          };
+
+          if (decision.action === "SKIP" || !decision.side || !decision.tokenId || !decision.limitPrice || !decision.shareSize) {
+            return {
+              audit,
+              order: null,
+              cycleLockUntilMs: cycleLockExpireMs(best.endDate),
+            };
           }
 
           return {
-            target,
-            label,
-            symbol,
-            best,
-            pred,
-            decision: {
-              side: decision.side,
-              tokenId: decision.tokenId,
-              limitPrice: decision.limitPrice,
-              shareSize: decision.shareSize,
-              edge: Number(decision.edge ?? 0),
+            audit,
+            cycleLockUntilMs: cycleLockExpireMs(best.endDate),
+            order: {
+              target,
+              label,
+              symbol,
+              best,
+              pred,
+              audit,
+              decision: {
+                side: decision.side,
+                tokenId: decision.tokenId,
+                limitPrice: decision.limitPrice,
+                shareSize: decision.shareSize,
+                edge: Number(decision.edge ?? 0),
+              },
+              entryRefPrice: facts.price.last,
             },
-            entryRefPrice: closes[closes.length - 1],
           };
         } catch (targetErr) {
           log(`[${label}] loop error`, targetErr instanceof Error ? targetErr.message : targetErr);
@@ -1115,14 +1121,18 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         }
       }));
 
-      const readyOrders = prepared
+      const readyOrders = evaluations
+        .filter((x): x is PreparedEvaluation => Boolean(x))
+        .map((x) => {
+          state.recordPrediction(x.audit);
+          targetAnalysisLocks.set(x.audit.targetId, x.cycleLockUntilMs);
+          return x.order;
+        })
         .filter((x): x is PreparedOrder => Boolean(x))
         .sort((a, b) => b.decision.edge - a.decision.edge);
 
       for (const order of readyOrders) {
         if (tradedMarketIds.has(order.best.marketId)) continue;
-        if (targetCycleLocks.has(order.target.id)) continue;
-
         log(`[${order.label}] selected market`, {
           marketId: order.best.marketId,
           conditionId: order.best.conditionId,
@@ -1134,6 +1144,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         });
         log(`[${order.label}] prediction`, order.pred);
         log(`[${order.label}] decision`, order.decision);
+        log(`[${order.label}] providers`, order.audit.providerReports);
 
         const response = await trader.placeBuyOrder({
           tokenId: order.decision.tokenId,
@@ -1145,7 +1156,6 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
 
         log(`[${order.label}] order response`, response);
         if (response?.dryRun || cfg.dryRun) {
-          targetCycleLocks.set(order.target.id, cycleOrderLockExpireMs(order.best.endDate));
           state.recordTrade({
             marketId: order.best.marketId,
             conditionId: order.best.conditionId,
@@ -1163,6 +1173,11 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             entryNotionalUsd: Number((order.decision.limitPrice * order.decision.shareSize).toFixed(6)),
             resolved: false,
             orderStatus: "DRY_RUN",
+            aiDirection: order.pred.direction,
+            aiProbUp: order.pred.probUp,
+            aiConfidence: order.pred.confidence,
+            aiProviderIds: order.pred.providerIds,
+            aiSummary: order.pred.summary,
           });
           log(`[${order.label}] dry-run trade recorded`, {
             marketId: order.best.marketId,
@@ -1196,7 +1211,6 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         }
 
         state.markMarketAttempt(order.best.marketId);
-        targetCycleLocks.set(order.target.id, cycleOrderLockExpireMs(order.best.endDate));
         state.recordTrade({
           marketId: order.best.marketId,
           conditionId: order.best.conditionId,
@@ -1216,6 +1230,11 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
           orderId,
           matchedSize: 0,
           orderStatus: String(response?.status ?? "OPEN"),
+          aiDirection: order.pred.direction,
+          aiProbUp: order.pred.probUp,
+          aiConfidence: order.pred.confidence,
+          aiProviderIds: order.pred.providerIds,
+          aiSummary: order.pred.summary,
         });
         tradedMarketIds.add(order.best.marketId);
       }

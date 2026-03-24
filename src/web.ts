@@ -9,10 +9,8 @@ import { Wallet } from "ethers";
 
 import { MAX_TARGETS, loadConfig, readRuntimeConfig, writeRuntimeConfig, type RuntimeConfigFile } from "./config.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
-import { getAllowedBacktestDays, runBacktestCompare, runBacktestDetailed } from "./services/backtest-service.js";
 import { readBotControlState, resolveBotControlMode, writeBotControlState } from "./services/bot-control.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
-import { deleteProfile, ensureDefaultProfiles, listProfiles, trainProfile, upsertProfile } from "./services/model-lab-service.js";
 import { StateStore } from "./services/state-store.js";
 import type { LiveTradeRecord } from "./types.js";
 
@@ -171,7 +169,7 @@ async function resolveMarketUrl(marketId: string): Promise<string | null> {
       }
     }
   } catch {
-    // keep fallbackUrl
+    // keep fallback
   }
 
   marketUrlCache.set(id, { ts: Date.now(), url: finalUrl });
@@ -247,7 +245,7 @@ function validateRuntimeConfig(payload: unknown): { ok: true; data: RuntimeConfi
     return { ok: false, error: "config must be object" };
   }
   const data = payload as RuntimeConfigFile;
-  if (!data.runtime || !data.prediction || !data.marketFilter || !data.network || !data.training) {
+  if (!data.runtime || !data.prediction || !data.marketFilter || !data.network) {
     return { ok: false, error: "missing required top-level sections" };
   }
   const targets = data.prediction.targets;
@@ -336,8 +334,19 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
       }
 
       if (method === "GET" && pathname === "/api/config") {
-        const cfg = readRuntimeConfig();
-        sendJson(res, 200, cfg);
+        sendJson(res, 200, readRuntimeConfig());
+        return;
+      }
+
+      if (method === "GET" && pathname === "/api/provider") {
+        const { provider } = loadConfig();
+        const { apiKey, ...safeProvider } = provider;
+        sendJson(res, 200, {
+          provider: {
+            ...safeProvider,
+            hasApiKey: Boolean(apiKey),
+          },
+        });
         return;
       }
 
@@ -368,6 +377,12 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         return;
       }
 
+      if ((method === "POST" || method === "DELETE") && pathname === "/api/logs/clear") {
+        clearLogFile(LOG_FILE);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
       if (method === "GET" && pathname === "/api/account") {
         const summary = await fetchAccountSummaryCached();
         sendJson(res, 200, summary);
@@ -393,14 +408,12 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         const pageSize = Math.min(100, parsePositiveInt(parsedUrl.searchParams.get("pageSize"), 20));
         const targetId = String(parsedUrl.searchParams.get("targetId") || "").trim();
         const resolvedParam = String(parsedUrl.searchParams.get("resolved") || "").trim().toLowerCase();
-        const includeAttempts = String(parsedUrl.searchParams.get("includeAttempts") || "").trim().toLowerCase() === "true";
 
         const state = stateStore.load();
         const allTrades = [...(state.trades ?? [])];
         allTrades.sort((a, b) => Date.parse(b.entryTime) - Date.parse(a.entryTime));
 
         const filtered = allTrades.filter((t) => {
-          if (!includeAttempts && executionModeText(t) !== "LIVE" && (!t.orderId || !String(t.orderId).trim()) && t.executionMode !== "DRY_RUN") return false;
           if (targetId && t.targetId !== targetId) return false;
           if (resolvedParam === "true" && !t.resolved) return false;
           if (resolvedParam === "false" && t.resolved) return false;
@@ -434,260 +447,21 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         return;
       }
 
-      if (method === "POST" && pathname === "/api/backtest/run") {
-        const body = await readBody(req);
-        let payload: any;
-        try {
-          payload = JSON.parse(body || "{}");
-        } catch {
-          sendJson(res, 400, { error: "invalid JSON body" });
-          return;
-        }
-
-        const targetId = String(payload?.targetId || "").trim();
-        const days = Number(payload?.days);
-        const profileId = String(payload?.profileId || "").trim();
-        const modelPathRaw = String(payload?.modelPath || "").trim();
-        if (!targetId) {
-          sendJson(res, 400, { error: "targetId is required" });
-          return;
-        }
-        if (!Number.isFinite(days) || days <= 0) {
-          sendJson(res, 400, { error: "days must be positive number" });
-          return;
-        }
-
-        const cfg = loadConfig();
-        const target = cfg.targets.find((t) => t.id === targetId);
-        if (!target) {
-          sendJson(res, 404, { error: `target not found: ${targetId}` });
-          return;
-        }
-
-        const allowedDays = getAllowedBacktestDays(target.horizonMin);
-        if (!allowedDays.length) {
-          sendJson(res, 400, { error: `${target.horizonMin}m backtest is not supported now` });
-          return;
-        }
-        if (!allowedDays.includes(days)) {
-          sendJson(res, 400, {
-            error: `invalid days=${days} for ${target.horizonMin}m`,
-            allowedDays,
-          });
-          return;
-        }
-
-        let modelPathOverride: string | undefined;
-        if (profileId) {
-          const profiles = listProfiles(cfg);
-          const p = profiles.find((x) => x.id === profileId);
-          if (!p) {
-            sendJson(res, 404, { error: `profile not found: ${profileId}` });
-            return;
-          }
-          if (p.targetId !== targetId) {
-            sendJson(res, 400, { error: `profile ${profileId} does not belong to target ${targetId}` });
-            return;
-          }
-          modelPathOverride = p.modelPath;
-        } else if (modelPathRaw) {
-          modelPathOverride = modelPathRaw;
-        }
-
-        const out = await runBacktestDetailed(cfg, targetId, days, { modelPath: modelPathOverride });
-        sendJson(res, 200, {
-          ok: true,
-          result: out.result,
-          records: out.records,
-          allowedDays,
-        });
-        return;
-      }
-
-      if (method === "POST" && pathname === "/api/backtest/compare") {
-        const body = await readBody(req);
-        let payload: any;
-        try {
-          payload = JSON.parse(body || "{}");
-        } catch {
-          sendJson(res, 400, { error: "invalid JSON body" });
-          return;
-        }
-
-        const targetId = String(payload?.targetId || "").trim();
-        const days = Number(payload?.days);
-        const includeDefault = payload?.includeDefault !== false;
-        const profileIds = Array.isArray(payload?.profileIds)
-          ? payload.profileIds.map((x: unknown) => String(x || "").trim()).filter(Boolean)
-          : [];
-        if (!targetId) {
-          sendJson(res, 400, { error: "targetId is required" });
-          return;
-        }
-        if (!Number.isFinite(days) || days <= 0) {
-          sendJson(res, 400, { error: "days must be positive number" });
-          return;
-        }
-
-        const cfg = loadConfig();
-        const target = cfg.targets.find((t) => t.id === targetId);
-        if (!target) {
-          sendJson(res, 404, { error: `target not found: ${targetId}` });
-          return;
-        }
-
-        const allowedDays = getAllowedBacktestDays(target.horizonMin);
-        if (!allowedDays.length) {
-          sendJson(res, 400, { error: `${target.horizonMin}m backtest is not supported now` });
-          return;
-        }
-        if (!allowedDays.includes(days)) {
-          sendJson(res, 400, {
-            error: `invalid days=${days} for ${target.horizonMin}m`,
-            allowedDays,
-          });
-          return;
-        }
-
-        const allProfiles = listProfiles(cfg).filter((x) => x.targetId === targetId);
-        const profileSet = new Set(profileIds);
-        const pickedProfiles = profileSet.size > 0
-          ? allProfiles.filter((x) => profileSet.has(x.id))
-          : allProfiles;
-
-        const defaultModelPath = String(target.modelPath || cfg.trainedModelPath || "").trim();
-        const candidates: Array<{ profileId: string; modelName: string; modelPath: string }> = [];
-        if (includeDefault && defaultModelPath) {
-          candidates.push({
-            profileId: "__default__",
-            modelName: `默认模型(${target.id})`,
-            modelPath: defaultModelPath,
-          });
-        }
-        for (const p of pickedProfiles) {
-          candidates.push({
-            profileId: p.id,
-            modelName: p.name || p.id,
-            modelPath: p.modelPath,
-          });
-        }
-        if (!candidates.length) {
-          sendJson(res, 400, { error: "no model candidates for compare" });
-          return;
-        }
-
-        const out = await runBacktestCompare(cfg, targetId, days, candidates);
-        sendJson(res, 200, {
-          ok: true,
-          ...out,
-          allowedDays,
-        });
-        return;
-      }
-
-      if (method === "GET" && pathname === "/api/models/profiles") {
-        const cfg = loadConfig();
-        const profiles = listProfiles(cfg);
-        sendJson(res, 200, { profiles });
-        return;
-      }
-
-      if (method === "POST" && pathname === "/api/models/init") {
-        const cfg = loadConfig();
-        const profiles = ensureDefaultProfiles(cfg);
-        sendJson(res, 200, { ok: true, profiles });
-        return;
-      }
-
-      if (method === "POST" && pathname === "/api/models/profile") {
-        const body = await readBody(req);
-        let payload: any;
-        try {
-          payload = JSON.parse(body || "{}");
-        } catch {
-          sendJson(res, 400, { error: "invalid JSON body" });
-          return;
-        }
-        const targetId = String(payload?.targetId || "").trim();
-        if (!targetId) {
-          sendJson(res, 400, { error: "targetId is required" });
-          return;
-        }
-        const cfg = loadConfig();
-        const profile = upsertProfile(cfg, {
-          id: payload?.id,
-          targetId,
-          name: payload?.name,
-          trainDays: payload?.trainDays,
-          lookbackMin: payload?.lookbackMin,
-          stepMin: payload?.stepMin,
-          valDays: payload?.valDays,
-          epochs: payload?.epochs,
-          learningRate: payload?.learningRate,
-          l2: payload?.l2,
-          patience: payload?.patience,
-          modelPath: payload?.modelPath,
-        });
-        sendJson(res, 200, { ok: true, profile });
-        return;
-      }
-
-      if (method === "POST" && pathname === "/api/models/train") {
-        const body = await readBody(req);
-        let payload: any;
-        try {
-          payload = JSON.parse(body || "{}");
-        } catch {
-          sendJson(res, 400, { error: "invalid JSON body" });
-          return;
-        }
-        const profileId = String(payload?.profileId || "").trim();
-        if (!profileId) {
-          sendJson(res, 400, { error: "profileId is required" });
-          return;
-        }
-        const cfg = loadConfig();
-        const profile = await trainProfile(cfg, profileId);
-        sendJson(res, 200, { ok: true, profile });
-        return;
-      }
-
-      if (method === "POST" && pathname === "/api/models/delete") {
-        const body = await readBody(req);
-        let payload: any;
-        try {
-          payload = JSON.parse(body || "{}");
-        } catch {
-          sendJson(res, 400, { error: "invalid JSON body" });
-          return;
-        }
-        const profileId = String(payload?.profileId || "").trim();
-        const deleteModelFile = payload?.deleteModelFile !== false;
-        if (!profileId) {
-          sendJson(res, 400, { error: "profileId is required" });
-          return;
-        }
-        const cfg = loadConfig();
-        const deleted = deleteProfile(cfg, profileId, { deleteModelFile });
-        const profiles = listProfiles(cfg);
-        sendJson(res, 200, { ok: true, deleted, profiles });
-        return;
-      }
-
-      if ((method === "POST" || method === "DELETE") && pathname === "/api/logs/clear") {
-        clearLogFile(LOG_FILE);
-        sendJson(res, 200, { ok: true });
-        return;
-      }
-
       if ((method === "POST" || method === "DELETE") && pathname === "/api/trades/clear") {
         stateStore.clearTrades(true);
         sendJson(res, 200, { ok: true });
         return;
       }
 
-      if ((method === "POST" || method === "DELETE") && pathname === "/api/logs" && parsedUrl.searchParams.get("action") === "clear") {
-        clearLogFile(LOG_FILE);
+      if (method === "GET" && pathname === "/api/predictions") {
+        const limit = Math.min(200, parsePositiveInt(parsedUrl.searchParams.get("limit"), 50));
+        const items = stateStore.listPredictions(limit);
+        sendJson(res, 200, { items });
+        return;
+      }
+
+      if ((method === "POST" || method === "DELETE") && pathname === "/api/predictions/clear") {
+        stateStore.clearPredictions();
         sendJson(res, 200, { ok: true });
         return;
       }
