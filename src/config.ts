@@ -3,15 +3,14 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 
-export const MAX_TARGETS = 4;
-export const SUPPORTED_COINS = ["BTC", "ETH", "SOL", "XRP"] as const;
-export const SUPPORTED_HORIZONS = [15] as const;
+export const MAX_TARGETS = 8;
+export const SUPPORTED_COINS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "HYPE"] as const;
+export const SUPPORTED_HORIZONS = [5] as const;
+export const DEFAULT_ORDER_PRICE = 0.01;
+export const DEFAULT_ORDER_SHARE_SIZE = 10;
 
 export type SupportedCoin = (typeof SUPPORTED_COINS)[number];
 export type SupportedHorizon = (typeof SUPPORTED_HORIZONS)[number];
-export type ProviderApiType = "openai_responses" | "openai_chat_compatible";
-export type ProviderResponseMode = "json_schema" | "json_object";
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
 
 export interface MarketTarget {
   id: string;
@@ -21,47 +20,17 @@ export interface MarketTarget {
   symbol: string;
 }
 
-export interface ResolvedAiProviderConfig {
-  id: string;
-  label: string;
-  apiType: ProviderApiType;
-  model: string;
-  baseUrl: string;
-  apiKeyEnvVar: string;
-  apiKey: string;
-  reasoningEffort?: ReasoningEffort;
-  temperature: number;
-  maxOutputTokens: number;
-  timeoutMs: number;
-  responseMode: ProviderResponseMode;
-}
-
 export interface RuntimeConfigFile {
   runtime: {
     dryRun: boolean;
     pollIntervalSec: number;
     autoClaim?: boolean;
-    claimCooldownSec?: number;
-    maxDrawdownPct?: number;
-    maxOpenTrades?: number;
-    maxTradesPerDay?: number;
-    maxConsecutiveLosses?: number;
+    claimIntervalSec?: number;
   };
-  prediction: {
-    horizonMin?: number;
-    factLookbackMinutes?: number;
-    minConfidence?: number;
-    maxOrderNotionalUsd?: number;
+  strategy: {
     fixedOrderPrice?: number;
-    systemPrompt?: string;
-    userPromptTemplate?: string;
+    orderShareSize?: number;
     targets?: Partial<MarketTarget>[];
-  };
-  marketFilter: {
-    minMarketLiquidity: number;
-    minTimeToExpiryMin: number;
-    maxTimeToExpiryMin: number;
-    minEntrySeconds?: number;
   };
   network: {
     polyHost: string;
@@ -82,22 +51,10 @@ export interface Config {
   dryRun: boolean;
   pollIntervalSec: number;
   autoClaim: boolean;
-  claimCooldownSec: number;
-  maxDrawdownPct: number;
-  maxOpenTrades: number;
-  maxTradesPerDay: number;
-  maxConsecutiveLosses: number;
+  claimIntervalSec: number;
   horizonMin: SupportedHorizon;
-  factLookbackMinutes: number;
-  minConfidence: number;
-  maxOrderNotionalUsd: number;
   fixedOrderPrice: number;
-  systemPrompt: string;
-  userPromptTemplate: string;
-  minMarketLiquidity: number;
-  minTimeToExpiryMin: number;
-  maxTimeToExpiryMin: number;
-  minEntrySeconds: number;
+  orderShareSize: number;
   polyHost: string;
   gammaHost: string;
   dataApiHost: string;
@@ -110,7 +67,6 @@ export interface Config {
   usdcAddress: string;
   ctfAddress: string;
   targets: MarketTarget[];
-  provider: ResolvedAiProviderConfig;
   privateKey: string;
   funderAddress?: string;
   apiKey?: string;
@@ -122,30 +78,6 @@ export interface Config {
 }
 
 const RUNTIME_CONFIG_PATH = path.resolve("config", "runtime.json");
-
-export const DEFAULT_SYSTEM_PROMPT = [
-  "你是一个短周期市场事实分析器。",
-  "你只能依据提供给你的事实包做判断，不允许补充未提供的新闻、链上事件或主观猜测。",
-  "你的任务是预测未来 15 分钟标的方向，并输出结构化 JSON。",
-  "除非输入字段明显缺失、无法解析，或者市场事实明显损坏，否则你必须给出 UP 或 DOWN。",
-  "即使优势很弱，也要输出最可能方向，并把 confidence 调低。",
-  "tradeable 只表示是否值得执行交易，不影响 direction 的输出。",
-  "不要仅仅因为信号混合、波动小或可能已部分定价，就默认输出 ABSTAIN。",
-].join("\n");
-
-export const DEFAULT_USER_PROMPT_TEMPLATE = [
-  "请基于下面的事实包，判断 {{coin}} 在未来 {{horizonMin}} 分钟的方向。",
-  "你面对的是 Polymarket 的 Up/Down 市场，YES 表示 UP，NO 表示 DOWN。",
-  "事实包如下：",
-  "{{factsJson}}",
-  "",
-  "输出要求：",
-  "1. direction 只能是 UP / DOWN / ABSTAIN；只有输入损坏或无法判断时才允许 ABSTAIN",
-  "2. probUp 与 confidence 都必须在 0 到 1 之间",
-  "3. 即使 tradeable=false，也必须给出最可能方向",
-  "4. reasons 与 risks 要尽量简洁，聚焦事实，不要写空话",
-  "5. 若 direction=ABSTAIN，则 tradeable 必须为 false",
-].join("\n");
 
 function parseSignatureType(raw: string | undefined, fallback: number): number {
   const n = Number(raw);
@@ -159,28 +91,10 @@ function parsePositiveInt(raw: unknown, fallback: number): number {
   return Math.floor(n);
 }
 
-function parseNonNegativeInt(raw: unknown, fallback: number): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return fallback;
-  return Math.floor(n);
-}
-
 function parsePositiveNumber(raw: unknown, fallback: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return fallback;
   return n;
-}
-
-function parseNonNegativeNumber(raw: unknown, fallback: number): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return fallback;
-  return n;
-}
-
-function clampNumber(raw: unknown, min: number, max: number, fallback: number): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
 }
 
 function normalizeFixedOrderPrice(raw: unknown, fallback: number): number {
@@ -209,37 +123,16 @@ function normalizeHorizon(raw: unknown, fallback: SupportedHorizon): SupportedHo
   return fallback;
 }
 
-function normalizeProviderApiType(raw: unknown): ProviderApiType {
-  const v = String(raw ?? "").trim().toLowerCase();
-  if (v === "openai_chat_compatible" || v === "chat" || v === "openai-compatible") {
-    return "openai_chat_compatible";
-  }
-  return "openai_responses";
-}
-
-function normalizeResponseMode(raw: unknown): ProviderResponseMode {
-  const v = String(raw ?? "").trim().toLowerCase();
-  return v === "json_object" ? "json_object" : "json_schema";
-}
-
-function normalizeReasoningEffort(raw: unknown): ReasoningEffort | undefined {
-  const v = String(raw ?? "").trim().toLowerCase();
-  if (v === "minimal" || v === "low" || v === "medium" || v === "high") {
-    return v;
-  }
-  return undefined;
-}
-
 export function getTargetId(coin: SupportedCoin, horizonMin: SupportedHorizon): string {
   return `${coin}_${horizonMin}m`;
 }
 
 function buildDefaultTargets(): MarketTarget[] {
   return SUPPORTED_COINS.map((coin, idx) => ({
-    id: getTargetId(coin, 15),
+    id: getTargetId(coin, 5),
     enabled: idx === 0,
     coin,
-    horizonMin: 15,
+    horizonMin: 5,
     symbol: `${coin}USDT`,
   }));
 }
@@ -253,7 +146,7 @@ function normalizeTargets(rawTargets: Partial<MarketTarget>[] | undefined): Mark
   for (let i = 0; i < rawTargets.length && out.length < MAX_TARGETS; i += 1) {
     const t = rawTargets[i] ?? {};
     const coin = normalizeCoin(t.coin, "BTC");
-    const horizonMin = normalizeHorizon(t.horizonMin, 15);
+    const horizonMin = normalizeHorizon(t.horizonMin, 5);
     const id = typeof t.id === "string" && t.id.trim() ? t.id.trim() : getTargetId(coin, horizonMin);
     if (seen.has(id)) continue;
     seen.add(id);
@@ -267,65 +160,6 @@ function normalizeTargets(rawTargets: Partial<MarketTarget>[] | undefined): Mark
   }
 
   return out.length > 0 ? out : defaults;
-}
-
-function parseEnvBool(raw: string | undefined, fallback: boolean): boolean {
-  if (raw == null || raw.trim() === "") return fallback;
-  const value = raw.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(value)) return true;
-  if (["0", "false", "no", "off"].includes(value)) return false;
-  return fallback;
-}
-
-function buildResolvedProvider(input: {
-  id?: string;
-  label?: string;
-  apiType?: unknown;
-  model?: string;
-  baseUrl?: string;
-  apiKeyEnvVar: string;
-  apiKey?: string;
-  reasoningEffort?: unknown;
-  temperature?: unknown;
-  maxOutputTokens?: unknown;
-  timeoutMs?: unknown;
-  responseMode?: unknown;
-}): ResolvedAiProviderConfig {
-  const apiType = normalizeProviderApiType(input.apiType);
-  const model = String(input.model || "").trim();
-  const apiKey = String(input.apiKey || "").trim();
-  const baseUrl = String(input.baseUrl || (apiType === "openai_responses" ? "https://api.openai.com/v1" : "")).trim();
-  return {
-    id: String(input.id || "ai_primary").trim() || "ai_primary",
-    label: String(input.label || input.id || "AI Primary").trim() || "AI Primary",
-    apiType,
-    model,
-    baseUrl,
-    apiKeyEnvVar: input.apiKeyEnvVar,
-    apiKey,
-    reasoningEffort: normalizeReasoningEffort(input.reasoningEffort),
-    temperature: clampNumber(input.temperature, 0, 2, 0.2),
-    maxOutputTokens: parsePositiveInt(input.maxOutputTokens, 600),
-    timeoutMs: parsePositiveInt(input.timeoutMs, 30000),
-    responseMode: normalizeResponseMode(input.responseMode),
-  };
-}
-
-function buildProviderFromEnv(): ResolvedAiProviderConfig {
-  return buildResolvedProvider({
-    id: process.env.AI_ID || "deepseek_primary",
-    label: process.env.AI_LABEL || "DeepSeek Primary",
-    apiType: process.env.AI_API_TYPE || "openai_chat_compatible",
-    model: process.env.AI_MODEL || "deepseek-chat",
-    baseUrl: process.env.AI_BASE_URL || "https://api.deepseek.com",
-    apiKeyEnvVar: "AI_API_KEY",
-    apiKey: process.env.AI_API_KEY,
-    reasoningEffort: process.env.AI_REASONING_EFFORT,
-    temperature: process.env.AI_TEMPERATURE,
-    maxOutputTokens: process.env.AI_MAX_OUTPUT_TOKENS,
-    timeoutMs: process.env.AI_TIMEOUT_MS,
-    responseMode: process.env.AI_RESPONSE_MODE || "json_object",
-  });
 }
 
 export function readRuntimeConfig(): RuntimeConfigFile {
@@ -358,29 +192,14 @@ export function loadConfig(): Config {
     ?? relayerTxTypeFromRuntime
     ?? (signatureType === 2 ? "SAFE" : "PROXY");
 
-  const fixedOrderPriceRaw = normalizeFixedOrderPrice(rc.prediction.fixedOrderPrice, 0.45);
-  const fixedOrderPrice = Math.max(0.01, Math.min(0.99, fixedOrderPriceRaw));
-
   return {
     dryRun: rc.runtime.dryRun !== false,
     pollIntervalSec: parsePositiveInt(rc.runtime.pollIntervalSec, 20),
-    autoClaim: rc.runtime.autoClaim ?? false,
-    claimCooldownSec: parsePositiveInt(rc.runtime.claimCooldownSec, 300),
-    maxDrawdownPct: parseNonNegativeNumber(rc.runtime.maxDrawdownPct, 0),
-    maxOpenTrades: parseNonNegativeInt(rc.runtime.maxOpenTrades, 6),
-    maxTradesPerDay: parseNonNegativeInt(rc.runtime.maxTradesPerDay, 120),
-    maxConsecutiveLosses: parseNonNegativeInt(rc.runtime.maxConsecutiveLosses, 4),
-    horizonMin: normalizeHorizon(rc.prediction.horizonMin, 15),
-    factLookbackMinutes: parsePositiveInt(rc.prediction.factLookbackMinutes, 90),
-    minConfidence: clampNumber(rc.prediction.minConfidence, 0, 1, 0.55),
-    maxOrderNotionalUsd: parsePositiveNumber(rc.prediction.maxOrderNotionalUsd, 2.5),
-    fixedOrderPrice,
-    systemPrompt: String(rc.prediction.systemPrompt || DEFAULT_SYSTEM_PROMPT).trim() || DEFAULT_SYSTEM_PROMPT,
-    userPromptTemplate: String(rc.prediction.userPromptTemplate || DEFAULT_USER_PROMPT_TEMPLATE).trim() || DEFAULT_USER_PROMPT_TEMPLATE,
-    minMarketLiquidity: parseNonNegativeNumber(rc.marketFilter.minMarketLiquidity, 300),
-    minTimeToExpiryMin: parsePositiveNumber(rc.marketFilter.minTimeToExpiryMin, 5),
-    maxTimeToExpiryMin: parsePositiveNumber(rc.marketFilter.maxTimeToExpiryMin, 20),
-    minEntrySeconds: parsePositiveInt(rc.marketFilter.minEntrySeconds, 45),
+    autoClaim: rc.runtime.autoClaim !== false,
+    claimIntervalSec: parsePositiveInt(rc.runtime.claimIntervalSec, 300),
+    horizonMin: 5,
+    fixedOrderPrice: Math.max(0.001, Math.min(0.99, normalizeFixedOrderPrice(rc.strategy.fixedOrderPrice, DEFAULT_ORDER_PRICE))),
+    orderShareSize: parsePositiveNumber(rc.strategy.orderShareSize, DEFAULT_ORDER_SHARE_SIZE),
     polyHost: rc.network.polyHost,
     gammaHost: rc.network.gammaHost,
     dataApiHost: rc.network.dataApiHost,
@@ -392,8 +211,7 @@ export function loadConfig(): Config {
     signatureType,
     usdcAddress: rc.network.usdcAddress,
     ctfAddress: rc.network.ctfAddress,
-    targets: normalizeTargets(rc.prediction.targets),
-    provider: buildProviderFromEnv(),
+    targets: normalizeTargets(rc.strategy.targets),
     privateKey: process.env.PRIVATE_KEY ?? "",
     funderAddress: process.env.FUNDER_ADDRESS,
     apiKey: process.env.POLY_API_KEY,

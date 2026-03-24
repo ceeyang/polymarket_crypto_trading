@@ -245,12 +245,12 @@ function validateRuntimeConfig(payload: unknown): { ok: true; data: RuntimeConfi
     return { ok: false, error: "config must be object" };
   }
   const data = payload as RuntimeConfigFile;
-  if (!data.runtime || !data.prediction || !data.marketFilter || !data.network) {
+  if (!data.runtime || !data.strategy || !data.network) {
     return { ok: false, error: "missing required top-level sections" };
   }
-  const targets = data.prediction.targets;
+  const targets = data.strategy.targets;
   if (Array.isArray(targets) && targets.length > MAX_TARGETS) {
-    return { ok: false, error: `prediction.targets exceeds ${MAX_TARGETS}` };
+    return { ok: false, error: `strategy.targets exceeds ${MAX_TARGETS}` };
   }
   return { ok: true, data };
 }
@@ -335,18 +335,6 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
 
       if (method === "GET" && pathname === "/api/config") {
         sendJson(res, 200, readRuntimeConfig());
-        return;
-      }
-
-      if (method === "GET" && pathname === "/api/provider") {
-        const { provider } = loadConfig();
-        const { apiKey, ...safeProvider } = provider;
-        sendJson(res, 200, {
-          provider: {
-            ...safeProvider,
-            hasApiKey: Boolean(apiKey),
-          },
-        });
         return;
       }
 

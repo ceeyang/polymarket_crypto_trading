@@ -9,10 +9,10 @@ export class GammaClient {
 
   async getCandidateMarkets(limit = 500, now = new Date()): Promise<GammaMarket[]> {
     const defaultTarget: MarketTarget = {
-      id: "ETH_15m",
+      id: "ETH_5m",
       enabled: true,
       coin: "ETH",
-      horizonMin: 15,
+      horizonMin: 5,
       symbol: "ETHUSDT",
     };
     return this.getCandidateMarketsForTarget(defaultTarget, limit, now);
@@ -73,10 +73,10 @@ export class GammaClient {
     excludedMarketIds?: Set<string>,
   ): SelectedMarket | null {
     const defaultTarget: MarketTarget = {
-      id: "ETH_15m",
+      id: "ETH_5m",
       enabled: true,
       coin: "ETH",
-      horizonMin: 15,
+      horizonMin: 5,
       symbol: "ETHUSDT",
     };
     return this.selectBestMarketForTarget(markets, defaultTarget, now, excludedMarketIds);
@@ -88,8 +88,7 @@ export class GammaClient {
     now = new Date(),
     excludedMarketIds?: Set<string>,
   ): SelectedMarket | null {
-    const strictCandidates: SelectedMarket[] = [];
-    const relaxedCandidates: SelectedMarket[] = [];
+    const candidates: SelectedMarket[] = [];
 
     for (const m of markets) {
       if (m.closed || m.archived) continue;
@@ -171,26 +170,12 @@ export class GammaClient {
 
       if (excludedMarketIds?.has(candidate.marketId)) continue;
 
-      const isStrict =
-        minsLeft >= this.config.minTimeToExpiryMin &&
-        minsLeft <= this.config.maxTimeToExpiryMin &&
-        liquidity >= this.config.minMarketLiquidity;
-
-      if (isStrict) strictCandidates.push(candidate);
-
-      const relaxedMax = Math.max(25, target.horizonMin * 3);
-      const relaxedLiquidityFloor = Math.max(100, this.config.minMarketLiquidity * 0.5);
-      const isRelaxed = minsLeft <= relaxedMax && liquidity >= relaxedLiquidityFloor;
-      if (isRelaxed) relaxedCandidates.push(candidate);
+      candidates.push(candidate);
     }
 
-    if (strictCandidates.length) {
-      strictCandidates.sort((a, b) => b.score - a.score);
-      return strictCandidates[0];
-    }
-    if (relaxedCandidates.length) {
-      relaxedCandidates.sort((a, b) => b.score - a.score);
-      return relaxedCandidates[0];
+    if (candidates.length) {
+      candidates.sort((a, b) => b.score - a.score);
+      return candidates[0];
     }
 
     return null;
@@ -390,6 +375,12 @@ export class GammaClient {
         return ["sol", "solana"];
       case "XRP":
         return ["xrp", "ripple"];
+      case "DOGE":
+        return ["doge", "dogecoin"];
+      case "BNB":
+        return ["bnb", "binance-coin", "binancecoin"];
+      case "HYPE":
+        return ["hype", "hyperliquid"];
     }
   }
 
@@ -404,6 +395,12 @@ export class GammaClient {
         return /\bsol\b|\bsolana\b/.test(s);
       case "XRP":
         return /\bxrp\b|\bripple\b/.test(s);
+      case "DOGE":
+        return /\bdoge\b|\bdogecoin\b/.test(s);
+      case "BNB":
+        return /\bbnb\b|\bbinance coin\b|\bbinancecoin\b/.test(s);
+      case "HYPE":
+        return /\bhype\b|\bhyperliquid\b/.test(s);
       default:
         return false;
     }
@@ -411,9 +408,9 @@ export class GammaClient {
 
   private hasHorizonHint(text: string, horizonMin: SupportedHorizon): boolean {
     const s = text.toLowerCase();
-    if (horizonMin === 15) {
-      return ["15m", "15 min", "15-min", "15 minute", "15 minutes", "15分钟"].some((h) => s.includes(h));
+    if (horizonMin === 5) {
+      return has5mHint(s);
     }
-    return has5mHint(s);
+    return false;
   }
 }

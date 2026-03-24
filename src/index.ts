@@ -5,16 +5,12 @@ import axios from "axios";
 import { Wallet } from "ethers";
 
 import { MAX_TARGETS, loadConfig, readRuntimeConfig, type Config, type MarketTarget } from "./config.js";
-import { BinanceClient, type BinanceCandle } from "./clients/binance.js";
 import { GammaClient } from "./clients/gamma.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
-import { makeDecision } from "./strategy/decision.js";
-import { predictWithProviders } from "./services/ai-predictor.js";
-import { readBotControlState, resolveBotControlMode, type BotControlMode, writeBotControlState } from "./services/bot-control.js";
+import { readBotControlState, resolveBotControlMode, type BotControlMode } from "./services/bot-control.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
-import { buildMarketFactPack } from "./services/market-facts.js";
 import { StateStore } from "./services/state-store.js";
-import type { Prediction, PredictionAuditRecord, SelectedMarket } from "./types.js";
+import type { PredictionAuditRecord, SelectedMarket, SideName } from "./types.js";
 import { sleep } from "./utils.js";
 
 const LOG_FILE = path.resolve("state", "runtime.log");
@@ -60,6 +56,22 @@ function isCurrentWindowByEnd(endDate: string, horizonMin: number, nowMs = Date.
   return { ok, minsToEnd, alignDiffMs };
 }
 
+function cycleStartInfo(
+  endDate: string,
+  horizonMin: number,
+  nowMs = Date.now(),
+): { startMs: number; elapsedSec: number; remainingSec: number } | null {
+  const endMs = Date.parse(endDate);
+  if (!Number.isFinite(endMs)) return null;
+  const cycleMs = horizonMin * 60_000;
+  const startMs = endMs - cycleMs;
+  return {
+    startMs,
+    elapsedSec: Math.max(0, (nowMs - startMs) / 1000),
+    remainingSec: Math.max(0, (endMs - nowMs) / 1000),
+  };
+}
+
 function withTargetOverrides(cfg: Config, target: MarketTarget): Config {
   return {
     ...cfg,
@@ -69,12 +81,6 @@ function withTargetOverrides(cfg: Config, target: MarketTarget): Config {
 
 function resolveSymbol(target: MarketTarget): string {
   return (target.symbol || `${target.coin}USDT`).toUpperCase();
-}
-
-function rawUsdcToNumber(raw: unknown): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 0;
-  return n / 1_000_000;
 }
 
 function normalizeConditionId(raw: unknown): string | null {
@@ -587,23 +593,26 @@ async function syncLiveOrdersAndCancelStale(
 
       const settleMs = Date.parse(t.settleTime);
       if (
-        matchedSize <= 0
+        matchedSize >= 0
         && Number.isFinite(settleMs)
         && nowMs >= settleMs
         && !isCancelledOrderStatus(status)
       ) {
         await cancelOrderBestEffort(trader, orderId, {
           label: t.targetId || "LIVE_ORDER",
-          reason: "previous_market_unfilled",
+          reason: matchedSize > 0 ? "cancel_remainder_at_settle" : "previous_market_unfilled",
         });
-        t.orderStatus = "CANCELED_PREV_MARKET_UNFILLED";
-        t.matchedSize = 0;
-        t.entryNotionalUsd = 0;
-        t.resolved = true;
-        t.settlementSource = "POLYMARKET_MARK_PRICE";
+        t.orderStatus = matchedSize > 0 ? "CANCELED_REMAINDER_AT_SETTLE" : "CANCELED_PREV_MARKET_UNFILLED";
         canceled += 1;
         changed = true;
-        continue;
+
+        if (matchedSize <= 0) {
+          t.matchedSize = 0;
+          t.entryNotionalUsd = 0;
+          t.resolved = true;
+          t.settlementSource = "POLYMARKET_MARK_PRICE";
+          continue;
+        }
       }
 
       if (isCancelledOrderStatus(status) && matchedSize <= 0) {
@@ -644,12 +653,6 @@ async function syncLiveOrdersAndCancelStale(
   return { checked, updated, canceled, finalizedCanceled };
 }
 
-function startOfLocalDayIso(now = new Date()): string {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
-
 function pruneExpiredCycleLocks(locks: Map<string, number>, nowMs = Date.now()): void {
   for (const [key, expireMs] of locks.entries()) {
     if (!Number.isFinite(expireMs) || expireMs <= nowMs) {
@@ -668,30 +671,22 @@ function predictionAuditId(targetId: string, marketId: string): string {
   return `${Date.now()}_${targetId}_${marketId}`;
 }
 
-function pickLookbackSize(cfg: Config): number {
-  return Math.max(60, cfg.factLookbackMinutes);
-}
-
 interface PreparedOrder {
   target: MarketTarget;
   label: string;
   symbol: string;
   best: SelectedMarket;
-  decision: {
-    side: "YES" | "NO";
-    tokenId: string;
-    limitPrice: number;
-    shareSize: number;
-    edge: number;
-  };
-  pred: Prediction;
+  side: SideName;
+  tokenId: string;
+  limitPrice: number;
+  shareSize: number;
   entryRefPrice: number;
-  audit: PredictionAuditRecord;
 }
 
 interface PreparedEvaluation {
   audit: PredictionAuditRecord;
-  order: PreparedOrder | null;
+  best: SelectedMarket;
+  orders: PreparedOrder[];
   cycleLockUntilMs: number;
 }
 
@@ -739,10 +734,7 @@ async function buildRuntimeContext(cfgKey: string, reloadToken: number): Promise
 
   const enabledTargets = cfg.targets.filter((x) => x.enabled).slice(0, MAX_TARGETS);
   if (enabledTargets.length === 0) {
-    throw new Error("No enabled targets in config.prediction.targets");
-  }
-  if (!cfg.provider.model || !cfg.provider.baseUrl) {
-    throw new Error("AI model configuration is incomplete in environment variables");
+    throw new Error("No enabled targets in config.strategy.targets");
   }
 
   return {
@@ -757,16 +749,12 @@ async function buildRuntimeContext(cfgKey: string, reloadToken: number): Promise
 
 export async function startBot(options?: StartBotOptions): Promise<void> {
   const controlMode = options?.controlMode ?? resolveBotControlMode(process.env.BOT_CONTROL_MODE);
-  const binance = new BinanceClient();
   const state = new StateStore();
   const sessionStartedAt = new Date().toISOString();
   const targetAnalysisLocks = new Map<string, number>();
   let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
   let autoClaimInFlight = false;
-  let lastBalanceCheckAtMs = 0;
-  let balanceCheckInFlight = false;
-  let peakCollateralUsdc: number | null = null;
   let lastScanEnabled: boolean | null = null;
 
   const reloadRuntime = async (reason: string): Promise<RuntimeContext> => {
@@ -793,7 +781,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
           controlMode,
         });
       }
-      log(`auto claim enabled=${next.cfg.autoClaim} cooldown=${next.cfg.claimCooldownSec}s`);
+      log(`auto claim enabled=${next.cfg.autoClaim} interval=${next.cfg.claimIntervalSec}s`);
       log("active targets", next.activeTargets.map((x) => ({
         id: x.id,
         coin: x.coin,
@@ -820,7 +808,6 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
     sessionWins: initialPerfSession.wins,
     sessionWinRate: Number((initialPerfSession.winRate * 100).toFixed(2)),
   });
-  let lastRiskGateKey = "";
 
   runtime = await reloadRuntime("startup");
 
@@ -848,7 +835,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
 
       if (cfg.autoClaim && !cfg.dryRun && !autoClaimInFlight) {
         const nowMs = Date.now();
-        if (nowMs - lastAutoClaimAtMs >= cfg.claimCooldownSec * 1000) {
+        if (nowMs - lastAutoClaimAtMs >= cfg.claimIntervalSec * 1000) {
           autoClaimInFlight = true;
           lastAutoClaimAtMs = nowMs;
           const cfgForClaim = cfg;
@@ -867,54 +854,6 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             })
             .finally(() => {
               autoClaimInFlight = false;
-            });
-        }
-      }
-
-      if (cfg.maxDrawdownPct > 0 && !cfg.dryRun && !balanceCheckInFlight) {
-        const nowMs = Date.now();
-        if (nowMs - lastBalanceCheckAtMs >= 30_000) {
-          balanceCheckInFlight = true;
-          lastBalanceCheckAtMs = nowMs;
-          const traderForBalance = trader;
-          const drawdownLimit = cfg.maxDrawdownPct;
-          void traderForBalance.getBalanceAllowance({ assetType: "COLLATERAL" })
-            .then((balancePayload) => {
-              const currentCollateralUsdc = rawUsdcToNumber(balancePayload?.balance ?? 0);
-              if (!Number.isFinite(currentCollateralUsdc) || currentCollateralUsdc <= 0) return;
-
-              if (peakCollateralUsdc == null || currentCollateralUsdc > peakCollateralUsdc) {
-                peakCollateralUsdc = currentCollateralUsdc;
-              }
-              const peak = peakCollateralUsdc ?? currentCollateralUsdc;
-              const drawdownPct = peak > 0 ? ((peak - currentCollateralUsdc) / peak) * 100 : 0;
-
-              if (drawdownPct >= drawdownLimit) {
-                log("risk stop triggered: max drawdown reached", {
-                  drawdownPct: Number(drawdownPct.toFixed(3)),
-                  maxDrawdownPct: drawdownLimit,
-                  peakCollateralUsdc: Number(peak.toFixed(4)),
-                  currentCollateralUsdc: Number(currentCollateralUsdc.toFixed(4)),
-                });
-                if (controlMode === "WEB_CONTROLLED") {
-                  const control = readBotControlState();
-                  if (control.scanningEnabled) {
-                    writeBotControlState(false, "risk_max_drawdown");
-                  }
-                  log("risk action applied: web mode scan paused", {
-                    controlMode,
-                    scanningEnabled: false,
-                  });
-                } else {
-                  setTimeout(() => process.exit(22), 0);
-                }
-              }
-            })
-            .catch((err) => {
-              log("balance check error", err instanceof Error ? err.message : err);
-            })
-            .finally(() => {
-              balanceCheckInFlight = false;
             });
         }
       }
@@ -938,47 +877,6 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         lastSummaryKey = summaryKey;
       }
 
-      const openTrades = state.getOpenTradeCount(perfMode);
-      const tradesToday = state.getTradeCountSince(startOfLocalDayIso(), perfMode);
-      const consecutiveLosses = state.getConsecutiveLossesSince(sessionStartedAt, perfMode);
-
-      if (cfg.maxConsecutiveLosses > 0 && consecutiveLosses >= cfg.maxConsecutiveLosses) {
-        log("risk stop triggered: max consecutive losses reached", {
-          consecutiveLosses,
-          maxConsecutiveLosses: cfg.maxConsecutiveLosses,
-        });
-        process.exit(24);
-      }
-
-      if (cfg.maxOpenTrades > 0 && openTrades >= cfg.maxOpenTrades) {
-        const gateKey = `maxOpenTrades:${openTrades}`;
-        if (gateKey !== lastRiskGateKey) {
-          log("risk gate active: too many open trades", {
-            openTrades,
-            maxOpenTrades: cfg.maxOpenTrades,
-          });
-          lastRiskGateKey = gateKey;
-        }
-        continue;
-      }
-
-      if (cfg.maxTradesPerDay > 0 && tradesToday >= cfg.maxTradesPerDay) {
-        const gateKey = `maxTradesPerDay:${tradesToday}`;
-        if (gateKey !== lastRiskGateKey) {
-          log("risk gate active: daily trade cap reached", {
-            tradesToday,
-            maxTradesPerDay: cfg.maxTradesPerDay,
-          });
-          lastRiskGateKey = gateKey;
-        }
-        continue;
-      }
-
-      if (lastRiskGateKey) {
-        log("risk gate cleared", { key: lastRiskGateKey });
-        lastRiskGateKey = "";
-      }
-
       const controlState = readBotControlState();
       const scanEnabled = controlMode === "STANDALONE" ? true : Boolean(controlState.scanningEnabled);
       if (scanEnabled !== lastScanEnabled) {
@@ -996,41 +894,18 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       }
 
       const tradedMarketIds = state.getTradedMarketIds();
-      const activeContexts = activeTargets.map((target) => {
-        const mergedCfg = withTargetOverrides(cfg, target);
-        return {
-          target,
-          label: targetLabel(target),
-          symbol: resolveSymbol(target),
-          mergedCfg,
-          lookback: pickLookbackSize(mergedCfg),
-        };
-      });
-
-      const symbolMaxLookback = new Map<string, number>();
-      for (const ctx of activeContexts) {
-        const prev = symbolMaxLookback.get(ctx.symbol) ?? 0;
-        if (ctx.lookback > prev) symbolMaxLookback.set(ctx.symbol, ctx.lookback);
-      }
-      const candlesPromises = new Map<string, Promise<{ candles: BinanceCandle[]; error?: string }>>();
-      for (const [symbol, lookback] of symbolMaxLookback.entries()) {
-        candlesPromises.set(
-          symbol,
-          binance.getRecentCandles(symbol, "1m", lookback)
-            .then((candles) => ({ candles }))
-            .catch((err) => ({
-              candles: [],
-              error: err instanceof Error ? err.message : String(err),
-            })),
-        );
-      }
+      const activeContexts = activeTargets.map((target) => ({
+        target,
+        label: targetLabel(target),
+        symbol: resolveSymbol(target),
+        mergedCfg: withTargetOverrides(cfg, target),
+      }));
 
       const evaluations = await Promise.all(activeContexts.map(async (ctx): Promise<PreparedEvaluation | null> => {
         const { target, label, symbol, mergedCfg } = ctx;
         try {
-          if (targetAnalysisLocks.has(target.id)) {
-            return null;
-          }
+          if (targetAnalysisLocks.has(target.id)) return null;
+
           const markets = await gamma.getCandidateMarketsForTarget(target, 500);
           const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
           if (!best) return null;
@@ -1046,31 +921,15 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             return null;
           }
 
-          const candleResult = await candlesPromises.get(symbol)!;
-          if (candleResult.error) {
-            log(`[${label}] skip: market facts fetch failed`, {
-              symbol,
-              error: candleResult.error,
-            });
+          const startInfo = cycleStartInfo(best.endDate, target.horizonMin);
+          if (!startInfo) {
+            log(`[${label}] skip: invalid cycle timing`, { marketId: best.marketId, endDate: best.endDate });
             return null;
           }
 
-          const candlesAll = candleResult.candles;
-          const candles = candlesAll.slice(-ctx.lookback);
-          if (candles.length < 30) {
-            log(`[${label}] skip: insufficient market facts`, { candles: candles.length });
-            return null;
-          }
-
-          const facts = buildMarketFactPack({
-            target,
-            market: best,
-            candles,
-            fixedOrderPrice: mergedCfg.fixedOrderPrice,
-          });
-          const aiResult = await predictWithProviders(mergedCfg, facts);
-          const pred = aiResult.aggregate;
-          const decision = makeDecision(pred, best, mergedCfg, target.horizonMin);
+          const shareSize = Number(mergedCfg.orderShareSize);
+          const limitPrice = Number(mergedCfg.fixedOrderPrice);
+          const plannedNotionalPerSideUsd = Number((shareSize * limitPrice).toFixed(6));
           const audit: PredictionAuditRecord = {
             id: predictionAuditId(target.id, best.marketId),
             createdAt: new Date().toISOString(),
@@ -1080,40 +939,50 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             horizonMin: target.horizonMin,
             marketId: best.marketId,
             marketTitle: best.title,
-            decisionAction: decision.action,
-            decisionReason: decision.reason,
-            aggregate: pred,
-            facts,
-            providerReports: aiResult.providerReports,
+            decisionAction: "BUY",
+            decisionReason: `dual-sided opening orders at ${limitPrice.toFixed(4)} x ${shareSize}`,
+            strategyMeta: {
+              mode: "DUAL_SIDE_OPENING",
+              marketStartTime: new Date(startInfo.startMs).toISOString(),
+              marketEndTime: best.endDate,
+              orderPrice: Number(limitPrice.toFixed(6)),
+              orderShareSize: Number(shareSize.toFixed(6)),
+              plannedNotionalPerSideUsd,
+              plannedTotalNotionalUsd: Number((plannedNotionalPerSideUsd * 2).toFixed(6)),
+              sides: ["YES", "NO"],
+            },
           };
 
-          if (decision.action === "SKIP" || !decision.side || !decision.tokenId || !decision.limitPrice || !decision.shareSize) {
-            return {
-              audit,
-              order: null,
-              cycleLockUntilMs: cycleLockExpireMs(best.endDate),
-            };
-          }
-
-          return {
-            audit,
-            cycleLockUntilMs: cycleLockExpireMs(best.endDate),
-            order: {
+          const orders: PreparedOrder[] = [
+            {
               target,
               label,
               symbol,
               best,
-              pred,
-              audit,
-              decision: {
-                side: decision.side,
-                tokenId: decision.tokenId,
-                limitPrice: decision.limitPrice,
-                shareSize: decision.shareSize,
-                edge: Number(decision.edge ?? 0),
-              },
-              entryRefPrice: facts.price.last,
+              side: "YES",
+              tokenId: best.yesTokenId,
+              limitPrice,
+              shareSize,
+              entryRefPrice: best.yesPrice,
             },
+            {
+              target,
+              label,
+              symbol,
+              best,
+              side: "NO",
+              tokenId: best.noTokenId,
+              limitPrice,
+              shareSize,
+              entryRefPrice: best.noPrice,
+            },
+          ];
+
+          return {
+            audit,
+            best,
+            orders,
+            cycleLockUntilMs: cycleLockExpireMs(best.endDate),
           };
         } catch (targetErr) {
           log(`[${label}] loop error`, targetErr instanceof Error ? targetErr.message : targetErr);
@@ -1121,122 +990,98 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         }
       }));
 
-      const readyOrders = evaluations
-        .filter((x): x is PreparedEvaluation => Boolean(x))
-        .map((x) => {
-          state.recordPrediction(x.audit);
-          targetAnalysisLocks.set(x.audit.targetId, x.cycleLockUntilMs);
-          return x.order;
-        })
-        .filter((x): x is PreparedOrder => Boolean(x))
-        .sort((a, b) => b.decision.edge - a.decision.edge);
+      const readyEvaluations = evaluations.filter((x): x is PreparedEvaluation => Boolean(x));
+      for (const evaluation of readyEvaluations) {
+        state.recordPrediction(evaluation.audit);
+        targetAnalysisLocks.set(evaluation.audit.targetId, evaluation.cycleLockUntilMs);
+      }
 
-      for (const order of readyOrders) {
-        if (tradedMarketIds.has(order.best.marketId)) continue;
-        log(`[${order.label}] selected market`, {
-          marketId: order.best.marketId,
-          conditionId: order.best.conditionId,
-          title: order.best.title,
-          endDate: order.best.endDate,
-          liquidity: order.best.liquidity,
-          yesPrice: order.best.yesPrice,
-          noPrice: order.best.noPrice,
-        });
-        log(`[${order.label}] prediction`, order.pred);
-        log(`[${order.label}] decision`, order.decision);
-        log(`[${order.label}] providers`, order.audit.providerReports);
+      for (const evaluation of readyEvaluations) {
+        if (tradedMarketIds.has(evaluation.best.marketId)) continue;
 
-        const response = await trader.placeBuyOrder({
-          tokenId: order.decision.tokenId,
-          price: order.decision.limitPrice,
-          size: order.decision.shareSize,
-          tickSize: order.best.tickSize,
-          negRisk: order.best.negRisk,
+        const { audit, best, orders } = evaluation;
+        log(`[${audit.targetId}] selected market`, {
+          marketId: best.marketId,
+          conditionId: best.conditionId,
+          title: best.title,
+          endDate: best.endDate,
+          liquidity: best.liquidity,
+          yesPrice: best.yesPrice,
+          noPrice: best.noPrice,
+          strategyMeta: audit.strategyMeta,
         });
 
-        log(`[${order.label}] order response`, response);
-        if (response?.dryRun || cfg.dryRun) {
+        state.markMarketAttempt(best.marketId);
+        tradedMarketIds.add(best.marketId);
+
+        for (const order of orders) {
+          const response = await trader.placeBuyOrder({
+            tokenId: order.tokenId,
+            price: order.limitPrice,
+            size: order.shareSize,
+            tickSize: best.tickSize,
+            negRisk: best.negRisk,
+          });
+
+          log(`[${order.label}] order response`, {
+            marketId: best.marketId,
+            side: order.side,
+            response,
+          });
+
+          if (response?.dryRun || cfg.dryRun) {
+            state.recordTrade({
+              marketId: best.marketId,
+              conditionId: best.conditionId,
+              marketTitle: best.title,
+              targetId: order.target.id,
+              coin: order.target.coin,
+              horizonMin: order.target.horizonMin,
+              symbol: order.symbol,
+              side: order.side,
+              executionMode: "DRY_RUN",
+              entryTime: new Date().toISOString(),
+              settleTime: best.endDate,
+              entryRefPrice: order.entryRefPrice,
+              entryPrice: order.limitPrice,
+              entryNotionalUsd: Number((order.limitPrice * order.shareSize).toFixed(6)),
+              resolved: false,
+              orderStatus: "DRY_RUN",
+            });
+            continue;
+          }
+
+          const orderIdRaw = response?.orderID ?? response?.orderId ?? response?.id;
+          const orderId = orderIdRaw ? String(orderIdRaw) : undefined;
+          if (!orderId) {
+            log(`[${order.label}] skip record: missing order id`, {
+              side: order.side,
+              response,
+            });
+            continue;
+          }
+
           state.recordTrade({
-            marketId: order.best.marketId,
-            conditionId: order.best.conditionId,
-            marketTitle: order.best.title,
+            marketId: best.marketId,
+            conditionId: best.conditionId,
+            marketTitle: best.title,
             targetId: order.target.id,
             coin: order.target.coin,
             horizonMin: order.target.horizonMin,
             symbol: order.symbol,
-            side: order.decision.side,
-            executionMode: "DRY_RUN",
+            side: order.side,
+            executionMode: "LIVE",
             entryTime: new Date().toISOString(),
-            settleTime: order.best.endDate,
+            settleTime: best.endDate,
             entryRefPrice: order.entryRefPrice,
-            entryPrice: order.decision.limitPrice,
-            entryNotionalUsd: Number((order.decision.limitPrice * order.decision.shareSize).toFixed(6)),
+            entryPrice: order.limitPrice,
+            entryNotionalUsd: 0,
             resolved: false,
-            orderStatus: "DRY_RUN",
-            aiDirection: order.pred.direction,
-            aiProbUp: order.pred.probUp,
-            aiConfidence: order.pred.confidence,
-            aiProviderIds: order.pred.providerIds,
-            aiSummary: order.pred.summary,
-          });
-          log(`[${order.label}] dry-run trade recorded`, {
-            marketId: order.best.marketId,
-            title: order.best.title,
-            side: order.decision.side,
-            entryPrice: order.decision.limitPrice,
-          });
-          tradedMarketIds.add(order.best.marketId);
-          continue;
-        }
-
-        const orderIdRaw = response?.orderID ?? response?.orderId ?? response?.id;
-        const orderId = orderIdRaw ? String(orderIdRaw) : undefined;
-        if (!orderId) {
-          state.markMarketAttempt(order.best.marketId);
-          log(`[${order.label}] skip record: missing order id`, response);
-          tradedMarketIds.add(order.best.marketId);
-          continue;
-        }
-
-        const intendedNotional = order.decision.limitPrice * order.decision.shareSize;
-        if (!Number.isFinite(intendedNotional) || intendedNotional <= 0 || intendedNotional > cfg.maxOrderNotionalUsd + 1e-6) {
-          log(`[${order.label}] risk guard: cancel abnormal notional order`, {
             orderId,
-            intendedNotional: Number.isFinite(intendedNotional) ? Number(intendedNotional.toFixed(6)) : intendedNotional,
-            maxOrderNotionalUsd: cfg.maxOrderNotionalUsd,
+            matchedSize: 0,
+            orderStatus: String(response?.status ?? "OPEN"),
           });
-          await cancelOrderBestEffort(trader, orderId, { label: order.label, reason: "abnormal_notional" });
-          tradedMarketIds.add(order.best.marketId);
-          continue;
         }
-
-        state.markMarketAttempt(order.best.marketId);
-        state.recordTrade({
-          marketId: order.best.marketId,
-          conditionId: order.best.conditionId,
-          marketTitle: order.best.title,
-          targetId: order.target.id,
-          coin: order.target.coin,
-          horizonMin: order.target.horizonMin,
-          symbol: order.symbol,
-          side: order.decision.side,
-          executionMode: "LIVE",
-          entryTime: new Date().toISOString(),
-          settleTime: order.best.endDate,
-          entryRefPrice: order.entryRefPrice,
-          entryPrice: order.decision.limitPrice,
-          entryNotionalUsd: 0,
-          resolved: false,
-          orderId,
-          matchedSize: 0,
-          orderStatus: String(response?.status ?? "OPEN"),
-          aiDirection: order.pred.direction,
-          aiProbUp: order.pred.probUp,
-          aiConfidence: order.pred.confidence,
-          aiProviderIds: order.pred.providerIds,
-          aiSummary: order.pred.summary,
-        });
-        tradedMarketIds.add(order.best.marketId);
       }
     } catch (err) {
       log("main loop error", err instanceof Error ? err.message : err);

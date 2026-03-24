@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Polymarket AI Dashboard</title>
+    <title>Polymarket Dual-Side Dashboard</title>
     <style>
       @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap");
 
@@ -315,7 +315,6 @@
         font-size: 12px;
       }
 
-      .provider-actions,
       .table-actions {
         display: flex;
         gap: 8px;
@@ -323,9 +322,171 @@
         flex-wrap: wrap;
       }
 
-      .provider-table input,
-      .provider-table select {
-        min-width: 88px;
+      .table-actions select,
+      .table-actions input {
+        width: auto;
+        min-width: 136px;
+        flex: 0 0 auto;
+      }
+
+      .table-actions button {
+        min-height: 46px;
+      }
+
+      .trade-shell {
+        display: grid;
+        gap: 14px;
+      }
+
+      .trade-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .trade-copy {
+        display: grid;
+        gap: 6px;
+      }
+
+      .trade-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        width: fit-content;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(15, 118, 110, 0.1), rgba(29, 78, 216, 0.1));
+        color: #22506e;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .trade-controls {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .trade-summary {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .trade-stat {
+        position: relative;
+        overflow: hidden;
+        padding: 16px;
+        border: 1px solid rgba(197, 213, 233, 0.95);
+        border-radius: 16px;
+        background:
+          radial-gradient(circle at 100% 0%, rgba(29, 78, 216, 0.08), transparent 38%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.94));
+      }
+
+      .trade-stat::after {
+        content: "";
+        position: absolute;
+        inset: 0 auto auto 0;
+        width: 100%;
+        height: 3px;
+        background: linear-gradient(90deg, rgba(15, 118, 110, 0.75), rgba(29, 78, 216, 0.75));
+        opacity: 0.75;
+      }
+
+      .trade-stat strong {
+        display: block;
+        margin-top: 6px;
+        font-size: 24px;
+        line-height: 1;
+      }
+
+      .trade-table-card {
+        overflow: hidden;
+        padding: 0;
+      }
+
+      .trade-table-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 18px 18px 10px;
+        flex-wrap: wrap;
+      }
+
+      .trade-table-wrap {
+        overflow: auto;
+        padding: 0 18px;
+      }
+
+      .trade-table-wrap table {
+        min-width: 920px;
+      }
+
+      .trade-table-wrap tbody tr:hover {
+        background: rgba(29, 78, 216, 0.04);
+      }
+
+      .trade-pager {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 14px 18px 18px;
+      }
+
+      .market-cell {
+        min-width: 240px;
+      }
+
+      .cell-title {
+        font-weight: 600;
+        color: var(--text);
+      }
+
+      .cell-sub {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .code-chip {
+        display: inline-block;
+        max-width: 150px;
+        overflow: hidden;
+        padding: 5px 8px;
+        border-radius: 10px;
+        border: 1px solid #d6dfeb;
+        background: #f7fbff;
+        color: #24425f;
+        font-size: 12px;
+        font-family: "SFMono-Regular", "SFMono-Regular", ui-monospace, monospace;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .side-yes {
+        background: rgba(6, 118, 71, 0.12);
+        color: var(--success);
+      }
+
+      .side-no {
+        background: rgba(180, 35, 24, 0.12);
+        color: var(--danger);
+      }
+
+      .empty-row td {
+        padding: 34px 12px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 14px;
       }
 
       .market-link {
@@ -367,8 +528,24 @@
       }
 
       @media (max-width: 1100px) {
-        .grid-2, .grid-3, .stats {
+        .grid-2, .grid-3, .stats, .trade-summary, .trade-hero {
           grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .trade-controls {
+          justify-content: stretch;
+        }
+
+        .table-actions select,
+        .table-actions input,
+        .trade-controls > * {
+          width: 100%;
+        }
+
+        .trade-pager {
+          align-items: stretch;
         }
       }
     </style>
@@ -378,8 +555,8 @@
       <section class="card hero">
         <div class="hero-top">
           <div>
-            <h1>Polymarket AI 15m Bot</h1>
-            <div class="muted">保留底层交易执行与结算，预测层改为单模型 LLM。默认建议使用模拟模式。</div>
+            <h1>Polymarket Dual-Side 5m Bot</h1>
+            <div class="muted">每个 5 分钟盘口开盘时同时挂 YES / NO 双边单，到期自动撤未成交余单。默认建议先用模拟模式。</div>
           </div>
           <div class="row">
             <span class="pill" id="modePill">运行模式读取中...</span>
@@ -407,14 +584,14 @@
       <div class="tabs">
         <button class="tab-btn active" data-tab="runtime">运行配置</button>
         <button class="tab-btn" data-tab="trades">交易记录</button>
-        <button class="tab-btn" data-tab="predictions">AI 判定</button>
+        <button class="tab-btn" data-tab="predictions">周期执行</button>
         <button class="tab-btn" data-tab="logs">运行日志</button>
       </div>
 
       <section class="card panel active" data-panel="runtime">
         <div class="toolbar">
           <div>
-            <h2>运行与 AI 配置</h2>
+            <h2>运行与双边挂单配置</h2>
             <div class="muted" id="cfgStatus">配置未加载</div>
           </div>
           <div class="row">
@@ -430,29 +607,25 @@
               <label class="toggle"><input id="dryRun" type="checkbox" />模拟模式 dry-run</label>
               <label class="toggle"><input id="autoClaim" type="checkbox" />自动赎回</label>
               <div class="field"><label for="pollIntervalSec">轮询间隔(秒)</label><input id="pollIntervalSec" type="number" min="5" step="1" /></div>
-              <div class="field"><label for="claimCooldownSec">赎回冷却(秒)</label><input id="claimCooldownSec" type="number" min="30" step="1" /></div>
-              <div class="field"><label for="maxOpenTrades">最大未结算单</label><input id="maxOpenTrades" type="number" min="0" step="1" /></div>
-              <div class="field"><label for="maxTradesPerDay">单日最大交易数</label><input id="maxTradesPerDay" type="number" min="0" step="1" /></div>
-              <div class="field"><label for="maxConsecutiveLosses">最大连续亏损</label><input id="maxConsecutiveLosses" type="number" min="0" step="1" /></div>
-              <div class="field"><label for="maxDrawdownPct">最大回撤%</label><input id="maxDrawdownPct" type="number" min="0" step="0.1" /></div>
+              <div class="field"><label for="claimIntervalSec">赎回间隔(秒)</label><input id="claimIntervalSec" type="number" min="30" step="1" /></div>
             </div>
           </div>
 
           <div class="section">
-            <h2>交易阈值</h2>
+            <h2>挂单参数</h2>
             <div class="grid-2" style="margin-top: 12px;">
-              <div class="field"><label for="factLookbackMinutes">事实回看分钟</label><input id="factLookbackMinutes" type="number" min="30" step="1" /></div>
-              <div class="field"><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" min="0" max="1" step="0.01" /></div>
-              <div class="field"><label for="fixedOrderPrice">固定挂单价格</label><input id="fixedOrderPrice" type="number" min="0.01" max="100" step="0.01" /></div>
-              <div class="field"><label for="maxOrderNotionalUsd">单笔最大金额</label><input id="maxOrderNotionalUsd" type="number" min="0.1" step="0.1" /></div>
-              <div class="field"><label>AI 模型来源</label><input type="text" value=".env 单模型配置" disabled /></div>
-              <div class="field"><label>默认提供方</label><input type="text" value="DeepSeek" disabled /></div>
+              <div class="field"><label>盘口周期</label><input type="text" value="5 分钟" disabled /></div>
+              <div class="field"><label>周期规则</label><input type="text" value="当前盘口周期内仅挂单一次" disabled /></div>
+              <div class="field"><label for="fixedOrderPrice">挂单价格</label><input id="fixedOrderPrice" type="number" min="0.001" max="0.99" step="0.001" /></div>
+              <div class="field"><label for="orderShareSize">每边挂单份数</label><input id="orderShareSize" type="number" min="1" step="1" /></div>
+              <div class="field"><label>下单模式</label><input type="text" value="YES / NO 双边同挂" disabled /></div>
+              <div class="field"><label>到期处理</label><input type="text" value="撤销未成交余单" disabled /></div>
             </div>
           </div>
 
           <div class="section">
-            <h2>15m 目标</h2>
-            <div class="muted" style="margin: 4px 0 10px;">当前只保留 15 分钟维度，启用目标会参与轮询。</div>
+            <h2>5m 目标</h2>
+            <div class="muted" style="margin: 4px 0 10px;">当前只保留 5 分钟维度，启用目标会参与轮询。</div>
             <table>
               <thead>
                 <tr>
@@ -466,105 +639,84 @@
           </div>
         </div>
 
-        <div class="grid-2" style="margin-top: 12px;">
-          <div class="section">
-            <h2>系统提示词</h2>
-            <div class="muted" style="margin: 4px 0 10px;">建议只写角色、约束和 ABSTAIN 规则，不写格式要求。</div>
-            <textarea id="systemPrompt"></textarea>
-          </div>
-
-          <div class="section">
-            <h2>用户提示词模板</h2>
-            <div class="muted" style="margin: 4px 0 10px;">支持变量：<code>{{coin}}</code> <code>{{symbol}}</code> <code>{{horizonMin}}</code> <code>{{factsJson}}</code></div>
-            <textarea id="userPromptTemplate"></textarea>
-          </div>
-        </div>
-
         <div class="section" style="margin-top: 12px;">
-          <div class="toolbar">
-            <div>
-              <h2>AI 模型（只读）</h2>
-              <div class="muted" id="providersStatus">模型配置来自 .env，不在 Web 中编辑。默认按 DeepSeek 配置，支持自定义 baseUrl。</div>
-            </div>
-            <div class="provider-actions">
-            </div>
-          </div>
-          <div style="overflow:auto; margin-top: 12px;">
-            <table class="provider-table">
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>ID</th>
-                  <th>类型</th>
-                  <th>模型</th>
-                  <th>Base URL</th>
-                  <th>Key 状态</th>
-                  <th>Reasoning</th>
-                  <th>Temp</th>
-                  <th>Max Tokens</th>
-                  <th>Response</th>
-                </tr>
-              </thead>
-              <tbody id="providersBody"></tbody>
-            </table>
+          <h2>策略说明</h2>
+          <div class="muted" style="margin-top: 8px;">
+            当前版本只做固定双边挂单，不再做 AI 判断、趋势判断或额外风控拦截。
+            Bot 会在每个 5m 盘口的当前周期内，只对每个目标执行一次双边挂单：
+            YES 与 NO 会按当前配置的价格与份数挂单；盘口结束后自动撤销未成交余单，并按设定间隔自动赎回收益。
           </div>
         </div>
       </section>
 
       <section class="card panel" data-panel="trades">
-        <div class="toolbar">
-          <div>
-            <h2>交易记录</h2>
-            <div class="muted" id="tradeStatus">尚未加载</div>
+        <div class="trade-shell">
+          <div class="section trade-hero">
+            <div class="trade-copy">
+              <span class="trade-kicker">Execution Ledger</span>
+              <div>
+                <h2>交易记录</h2>
+                <div class="muted" id="tradeStatus">尚未加载</div>
+              </div>
+              <div class="muted">查看每个盘口的挂单、撤单和最终结算状态。</div>
+            </div>
+            <div class="trade-controls table-actions">
+              <select id="tradeTarget"></select>
+              <select id="tradeResolved">
+                <option value="">全部状态</option>
+                <option value="false">未结算</option>
+                <option value="true">已结算</option>
+              </select>
+              <select id="tradePageSize">
+                <option value="20">20 / 页</option>
+                <option value="50">50 / 页</option>
+                <option value="100">100 / 页</option>
+              </select>
+              <button class="secondary" id="refreshTradesBtn">刷新</button>
+              <button class="danger" id="clearTradesBtn">清空</button>
+            </div>
           </div>
-          <div class="table-actions">
-            <select id="tradeTarget"></select>
-            <select id="tradeResolved">
-              <option value="">全部状态</option>
-              <option value="false">未结算</option>
-              <option value="true">已结算</option>
-            </select>
-            <select id="tradePageSize">
-              <option value="20">20 / 页</option>
-              <option value="50">50 / 页</option>
-              <option value="100">100 / 页</option>
-            </select>
-            <button class="secondary" id="refreshTradesBtn">刷新</button>
-            <button class="danger" id="clearTradesBtn">清空</button>
+
+          <div class="trade-summary">
+            <div class="trade-stat"><span class="muted">总交易</span><strong id="sTotal">0</strong></div>
+            <div class="trade-stat"><span class="muted">已结算</span><strong id="sSettled">0</strong></div>
+            <div class="trade-stat"><span class="muted">未结算</span><strong id="sPending">0</strong></div>
+            <div class="trade-stat"><span class="muted">胜</span><strong id="sWins">0</strong></div>
+            <div class="trade-stat"><span class="muted">负</span><strong id="sLosses">0</strong></div>
+            <div class="trade-stat"><span class="muted">胜率</span><strong id="sWinRate">0%</strong></div>
           </div>
-        </div>
 
-        <div class="stats" style="margin-top: 14px;">
-          <div class="stat"><span class="muted">总交易</span><strong id="sTotal">0</strong></div>
-          <div class="stat"><span class="muted">已结算</span><strong id="sSettled">0</strong></div>
-          <div class="stat"><span class="muted">未结算</span><strong id="sPending">0</strong></div>
-          <div class="stat"><span class="muted">胜</span><strong id="sWins">0</strong></div>
-          <div class="stat"><span class="muted">负</span><strong id="sLosses">0</strong></div>
-          <div class="stat"><span class="muted">胜率</span><strong id="sWinRate">0%</strong></div>
-        </div>
-
-        <div style="overflow:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>市场</th>
-                <th>方向</th>
-                <th>AI</th>
-                <th>状态</th>
-                <th>模式</th>
-                <th>入场价</th>
-                <th>入场时间</th>
-              </tr>
-            </thead>
-            <tbody id="tradesBody"></tbody>
-          </table>
-        </div>
-
-        <div class="toolbar" style="margin-top: 12px;">
-          <div class="muted" id="tradePageInfo"></div>
-          <div class="row">
-            <button class="secondary" id="tradePrevBtn">上一页</button>
-            <button class="secondary" id="tradeNextBtn">下一页</button>
+          <div class="section trade-table-card">
+            <div class="trade-table-head">
+              <div>
+                <h2>订单明细</h2>
+                <div class="muted">按市场、方向、状态和时间追踪当前执行结果。</div>
+              </div>
+              <div class="muted" id="tradePageInfo"></div>
+            </div>
+            <div class="trade-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>市场</th>
+                    <th>方向</th>
+                    <th>订单ID</th>
+                    <th>状态</th>
+                    <th>模式</th>
+                    <th>入场价</th>
+                    <th>入场时间</th>
+                  </tr>
+                </thead>
+                <tbody id="tradesBody"></tbody>
+              </table>
+            </div>
+            <div class="trade-pager">
+              <div class="muted">支持按盘口和状态筛选，列表会自动刷新。</div>
+              <div class="row">
+                <button class="secondary" id="tradePrevBtn">上一页</button>
+                <button class="secondary" id="tradeNextBtn">下一页</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -572,7 +724,7 @@
       <section class="card panel" data-panel="predictions">
         <div class="toolbar">
           <div>
-            <h2>最近 AI 判定</h2>
+            <h2>最近周期执行</h2>
             <div class="muted" id="predictionStatus">尚未加载</div>
           </div>
           <div class="table-actions">
@@ -593,13 +745,12 @@
                 <th>时间</th>
                 <th>目标</th>
                 <th>市场</th>
-                <th>模型</th>
-                <th>方向</th>
-                <th>ProbUp</th>
-                <th>置信度</th>
+                <th>计划</th>
+                <th>价格</th>
+                <th>份数</th>
+                <th>单边金额</th>
                 <th>动作</th>
-                <th>提交元数据</th>
-                <th>摘要</th>
+                <th>说明</th>
               </tr>
             </thead>
             <tbody id="predictionsBody"></tbody>
@@ -638,7 +789,6 @@
       const scanRefreshBtn = document.getElementById("scanRefreshBtn");
       const claimBalanceBtn = document.getElementById("claimBalanceBtn");
       const targetsBody = document.getElementById("targetsBody");
-      const providersBody = document.getElementById("providersBody");
       const tradesBody = document.getElementById("tradesBody");
       const tradeStatus = document.getElementById("tradeStatus");
       const tradeTarget = document.getElementById("tradeTarget");
@@ -650,7 +800,6 @@
       const predictionsBody = document.getElementById("predictionsBody");
       const predictionStatus = document.getElementById("predictionStatus");
       const predictionLimit = document.getElementById("predictionLimit");
-      const providersStatus = document.getElementById("providersStatus");
       const logArea = document.getElementById("logArea");
       const logStatus = document.getElementById("logStatus");
       const tailInput = document.getElementById("tailInput");
@@ -681,12 +830,11 @@
         return Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : "-";
       }
 
-      function fmtJson(value) {
-        try {
-          return JSON.stringify(value, null, 2);
-        } catch {
-          return String(value ?? "");
-        }
+      function compactId(value) {
+        const text = String(value || "").trim();
+        if (!text) return "-";
+        if (text.length <= 14) return text;
+        return `${text.slice(0, 6)}...${text.slice(-4)}`;
       }
 
       function setValue(id, value) {
@@ -721,33 +869,11 @@
           const tr = document.createElement("tr");
           tr.innerHTML = `
             <td><input class="target-enabled" data-idx="${idx}" type="checkbox" ${target.enabled ? "checked" : ""} /></td>
-            <td>${escapeHtml(`${target.coin || "-"}-15M`)}</td>
+            <td>${escapeHtml(`${target.coin || "-"}-5M`)}</td>
             <td><input class="target-symbol" data-idx="${idx}" type="text" value="${escapeHtml(target.symbol || "")}" /></td>
           `;
           targetsBody.appendChild(tr);
         }
-      }
-
-      function renderProvider(provider) {
-        providersBody.innerHTML = "";
-        if (!provider) {
-          providersBody.innerHTML = '<tr><td colspan="10" class="muted">当前未从 .env 解析到模型配置</td></tr>';
-          return;
-        }
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${escapeHtml(provider.label || "-")}</td>
-          <td>${escapeHtml(provider.id || "-")}</td>
-          <td>${escapeHtml(provider.apiType || "-")}</td>
-          <td>${escapeHtml(provider.model || "-")}</td>
-          <td>${escapeHtml(provider.baseUrl || "-")}</td>
-          <td>${provider.hasApiKey ? "已配置" : "缺失"}</td>
-          <td>${escapeHtml(provider.reasoningEffort || "-")}</td>
-          <td>${escapeHtml(provider.temperature ?? "-")}</td>
-          <td>${escapeHtml(provider.maxOutputTokens ?? "-")}</td>
-          <td>${escapeHtml(provider.responseMode || "-")}</td>
-        `;
-        providersBody.appendChild(tr);
       }
 
       function renderTradeTargets(targets) {
@@ -756,7 +882,7 @@
         for (const target of Array.isArray(targets) ? targets : []) {
           const opt = document.createElement("option");
           opt.value = target.id || "";
-          opt.textContent = `${target.coin || "-"}-15M`;
+          opt.textContent = `${target.coin || "-"}-5M`;
           tradeTarget.appendChild(opt);
         }
         tradeTarget.value = prev;
@@ -774,7 +900,7 @@
       function renderTrades(items) {
         tradesBody.innerHTML = "";
         if (!Array.isArray(items) || !items.length) {
-          tradesBody.innerHTML = '<tr><td colspan="7" class="muted">暂无交易记录</td></tr>';
+          tradesBody.innerHTML = '<tr class="empty-row"><td colspan="7">暂无交易记录，等待下一个盘口开盘后刷新。</td></tr>';
           return;
         }
         for (const trade of items) {
@@ -786,13 +912,19 @@
             : escapeHtml(title);
           const statusClass = trade.status === "WIN" ? "win" : trade.status === "LOSE" ? "lose" : trade.status === "CANCELED" ? "canceled" : "pending";
           const modeClass = trade.executionMode === "LIVE" ? "mode-live" : "mode-dry";
-          const aiLabel = trade.aiDirection
-            ? `${escapeHtml(trade.aiDirection)} / ${fmtPct(trade.aiConfidence ?? 0)}`
+          const sideClass = String(trade.side || "").toUpperCase() === "YES" ? "side-yes" : "side-no";
+          const orderIdRaw = String(trade.orderId || "").trim();
+          const orderIdLabel = orderIdRaw
+            ? `<span class="code-chip" title="${escapeHtml(orderIdRaw)}">${escapeHtml(compactId(orderIdRaw))}</span>`
             : "-";
+          const marketSub = trade.targetId || trade.symbol || "-";
           tr.innerHTML = `
-            <td>${titleHtml}</td>
-            <td>${escapeHtml(trade.side || "-")}</td>
-            <td>${aiLabel}</td>
+            <td class="market-cell">
+              <div class="cell-title">${titleHtml}</div>
+              <div class="cell-sub">${escapeHtml(marketSub)}</div>
+            </td>
+            <td><span class="badge ${sideClass}">${escapeHtml(trade.side || "-")}</span></td>
+            <td>${orderIdLabel}</td>
             <td><span class="badge ${statusClass}">${escapeHtml(trade.status || "PENDING")}</span></td>
             <td><span class="badge ${modeClass}">${escapeHtml(trade.executionMode || "DRY_RUN")}</span></td>
             <td>${fmtNumber(trade.entryPrice, 4)}</td>
@@ -805,45 +937,26 @@
       function renderPredictions(items) {
         predictionsBody.innerHTML = "";
         if (!Array.isArray(items) || !items.length) {
-          predictionsBody.innerHTML = '<tr><td colspan="10" class="muted">暂无 AI 判定记录</td></tr>';
+          predictionsBody.innerHTML = '<tr><td colspan="9" class="muted">暂无周期执行记录</td></tr>';
           return;
         }
         for (const item of items) {
           const tr = document.createElement("tr");
-          const direction = String(item?.aggregate?.direction || "ABSTAIN");
-          const dirClass = direction === "UP" ? "dir-up" : direction === "DOWN" ? "dir-down" : "dir-abstain";
-          const providerNames = Array.isArray(item?.aggregate?.providerIds) ? item.aggregate.providerIds.join(", ") : "-";
-          const providerReports = Array.isArray(item?.providerReports) ? item.providerReports : [];
-          const metaHtml = providerReports.length
-            ? providerReports.map((report, idx) => {
-                const requestMeta = report?.requestMeta;
-                if (!requestMeta) return "";
-                const label = [
-                  report?.providerLabel || report?.providerId || `provider_${idx + 1}`,
-                  requestMeta.endpoint,
-                  requestMeta.model,
-                ].filter(Boolean).join(" / ");
-                const payload = {
-                  providerId: report?.providerId || null,
-                  providerLabel: report?.providerLabel || null,
-                  latencyMs: report?.latencyMs ?? null,
-                  error: report?.error || null,
-                  request: requestMeta,
-                };
-                return `<details class="meta-details"><summary>${escapeHtml(label)}</summary><pre class="meta-pre">${escapeHtml(fmtJson(payload))}</pre></details>`;
-              }).filter(Boolean).join("")
-            : "-";
+          const strategy = item?.strategyMeta || {};
+          const orderPrice = strategy?.orderPrice;
+          const shareSize = strategy?.orderShareSize;
+          const perSideUsd = strategy?.plannedNotionalPerSideUsd;
+          const plannedSides = Array.isArray(strategy?.sides) ? strategy.sides.join(" / ") : "YES / NO";
           tr.innerHTML = `
             <td>${fmtTime(item?.createdAt)}</td>
             <td>${escapeHtml(item?.targetId || "-")}</td>
             <td>${escapeHtml(item?.marketTitle || item?.marketId || "-")}</td>
-            <td>${escapeHtml(providerNames)}</td>
-            <td><span class="badge ${dirClass}">${escapeHtml(direction)}</span></td>
-            <td>${fmtPct(item?.aggregate?.probUp ?? 0)}</td>
-            <td>${fmtPct(item?.aggregate?.confidence ?? 0)}</td>
+            <td>${escapeHtml(plannedSides)}</td>
+            <td>${fmtNumber(orderPrice, 4)}</td>
+            <td>${fmtNumber(shareSize, 0)}</td>
+            <td>${fmtNumber(perSideUsd, 4)}</td>
             <td>${escapeHtml(item?.decisionAction || "-")} / ${escapeHtml(item?.decisionReason || "")}</td>
-            <td>${metaHtml}</td>
-            <td>${escapeHtml(item?.aggregate?.summary || "-")}</td>
+            <td>${escapeHtml(item?.marketId || "-")}</td>
           `;
           predictionsBody.appendChild(tr);
         }
@@ -851,21 +964,13 @@
 
       function fillForm(cfg) {
         setValue("pollIntervalSec", cfg.runtime.pollIntervalSec);
-        setValue("claimCooldownSec", cfg.runtime.claimCooldownSec ?? 300);
-        setValue("maxOpenTrades", cfg.runtime.maxOpenTrades ?? 6);
-        setValue("maxTradesPerDay", cfg.runtime.maxTradesPerDay ?? 120);
-        setValue("maxConsecutiveLosses", cfg.runtime.maxConsecutiveLosses ?? 4);
-        setValue("maxDrawdownPct", cfg.runtime.maxDrawdownPct ?? 0);
-        setValue("factLookbackMinutes", cfg.prediction.factLookbackMinutes ?? 90);
-        setValue("minConfidence", cfg.prediction.minConfidence ?? 0.55);
-        setValue("fixedOrderPrice", cfg.prediction.fixedOrderPrice ?? 0.45);
-        setValue("maxOrderNotionalUsd", cfg.prediction.maxOrderNotionalUsd ?? 2.5);
-        setValue("systemPrompt", cfg.prediction.systemPrompt || "");
-        setValue("userPromptTemplate", cfg.prediction.userPromptTemplate || "");
+        setValue("claimIntervalSec", cfg.runtime.claimIntervalSec ?? 300);
+        setValue("fixedOrderPrice", cfg.strategy.fixedOrderPrice ?? 0.01);
+        setValue("orderShareSize", cfg.strategy.orderShareSize ?? 10);
         document.getElementById("dryRun").checked = Boolean(cfg.runtime.dryRun);
         document.getElementById("autoClaim").checked = Boolean(cfg.runtime.autoClaim);
-        renderTargets(cfg.prediction.targets || []);
-        renderTradeTargets(cfg.prediction.targets || []);
+        renderTargets(cfg.strategy.targets || []);
+        renderTradeTargets(cfg.strategy.targets || []);
         modePill.textContent = cfg.runtime.dryRun ? "当前配置: DRY_RUN" : "当前配置: LIVE";
       }
 
@@ -873,14 +978,14 @@
         const checks = document.querySelectorAll(".target-enabled");
         checks.forEach((el) => {
           const idx = Number(el.getAttribute("data-idx"));
-          const target = next.prediction.targets?.[idx];
+          const target = next.strategy.targets?.[idx];
           if (!target) return;
           target.enabled = Boolean(el.checked);
         });
         const symbols = document.querySelectorAll(".target-symbol");
         symbols.forEach((el) => {
           const idx = Number(el.getAttribute("data-idx"));
-          const target = next.prediction.targets?.[idx];
+          const target = next.strategy.targets?.[idx];
           if (!target) return;
           target.symbol = String(el.value || "").trim().toUpperCase() || target.symbol;
         });
@@ -891,39 +996,14 @@
         next.runtime.dryRun = document.getElementById("dryRun").checked;
         next.runtime.autoClaim = document.getElementById("autoClaim").checked;
         next.runtime.pollIntervalSec = Math.max(5, Math.round(num("pollIntervalSec", next.runtime.pollIntervalSec || 20)));
-        next.runtime.claimCooldownSec = Math.max(30, Math.round(num("claimCooldownSec", next.runtime.claimCooldownSec || 300)));
-        next.runtime.maxOpenTrades = Math.max(0, Math.round(num("maxOpenTrades", next.runtime.maxOpenTrades ?? 6)));
-        next.runtime.maxTradesPerDay = Math.max(0, Math.round(num("maxTradesPerDay", next.runtime.maxTradesPerDay ?? 120)));
-        next.runtime.maxConsecutiveLosses = Math.max(0, Math.round(num("maxConsecutiveLosses", next.runtime.maxConsecutiveLosses ?? 4)));
-        next.runtime.maxDrawdownPct = Math.max(0, num("maxDrawdownPct", next.runtime.maxDrawdownPct ?? 0));
-
-        next.prediction.factLookbackMinutes = Math.max(30, Math.round(num("factLookbackMinutes", next.prediction.factLookbackMinutes ?? 90)));
-        next.prediction.minConfidence = Math.max(0, Math.min(1, num("minConfidence", next.prediction.minConfidence ?? 0.55)));
-        const fixedOrderPriceRaw = num("fixedOrderPrice", next.prediction.fixedOrderPrice ?? 0.45);
-        next.prediction.fixedOrderPrice = Math.max(0.01, Math.min(0.99, fixedOrderPriceRaw > 1 && fixedOrderPriceRaw <= 100 ? fixedOrderPriceRaw / 100 : fixedOrderPriceRaw));
-        next.prediction.maxOrderNotionalUsd = Math.max(0.1, num("maxOrderNotionalUsd", next.prediction.maxOrderNotionalUsd ?? 2.5));
-        next.prediction.systemPrompt = String(document.getElementById("systemPrompt").value || "").trim();
-        next.prediction.userPromptTemplate = String(document.getElementById("userPromptTemplate").value || "").trim();
+        next.runtime.claimIntervalSec = Math.max(30, Math.round(num("claimIntervalSec", next.runtime.claimIntervalSec || 300)));
+        const fixedOrderPriceRaw = num("fixedOrderPrice", next.strategy.fixedOrderPrice ?? 0.01);
+        next.strategy.fixedOrderPrice = Math.max(0.001, Math.min(0.99, fixedOrderPriceRaw > 1 && fixedOrderPriceRaw <= 100 ? fixedOrderPriceRaw / 100 : fixedOrderPriceRaw));
+        next.strategy.orderShareSize = Math.max(1, Math.round(num("orderShareSize", next.strategy.orderShareSize ?? 10)));
 
         readTargets(next);
 
         return next;
-      }
-
-      async function loadProvider() {
-        try {
-          providersStatus.textContent = "从 .env 读取中...";
-          const resp = await fetch("/api/provider");
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-          const provider = data?.provider || null;
-          renderProvider(provider);
-          providersStatus.textContent = provider
-            ? "当前单模型配置已从 .env 载入"
-            : "当前未从 .env 读取到模型配置";
-        } catch (err) {
-          providersStatus.textContent = `读取失败: ${String(err)}`;
-        }
       }
 
       async function loadConfig() {
@@ -973,7 +1053,7 @@
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           renderTradeSummary(data.summary || {});
           renderTrades(data.items || []);
-          tradePageInfo.textContent = `第 ${data.pagination.page} / ${data.pagination.totalPages} 页，共 ${data.pagination.total} 条`;
+          tradePageInfo.textContent = `第 ${data.pagination.page} / ${data.pagination.totalPages} 页，共 ${data.pagination.total} 条记录`;
           tradePrevBtn.disabled = !data.pagination.hasPrev;
           tradeNextBtn.disabled = !data.pagination.hasNext;
           tradeQuery.page = data.pagination.page;
@@ -1012,7 +1092,7 @@
       }
 
       async function clearPredictions() {
-        const ok = window.confirm("确认清空 AI 判定记录？");
+        const ok = window.confirm("确认清空周期执行记录？");
         if (!ok) return;
         try {
           predictionStatus.textContent = "清空中...";
@@ -1123,7 +1203,6 @@
 
       document.getElementById("loadBtn").addEventListener("click", async () => {
         await loadConfig();
-        await loadProvider();
         tradeQuery.page = 1;
         await loadTrades();
         await loadPredictions();
@@ -1172,7 +1251,6 @@
       (async () => {
         setActiveTab(activeTab);
         await loadConfig();
-        await loadProvider();
         await loadTrades();
         await loadPredictions();
         await loadAccount();

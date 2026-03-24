@@ -1,104 +1,64 @@
 {
   "runtime": {
-    "dryRun": true,
+    "dryRun": false,
     "pollIntervalSec": 20,
-    "autoClaim": false,
-    "claimCooldownSec": 300,
-    "maxDrawdownPct": 0,
-    "maxOpenTrades": 0,
-    "maxTradesPerDay": 60,
-    "maxConsecutiveLosses": 0
+    "autoClaim": true,
+    "claimIntervalSec": 300
   },
-  "prediction": {
-    "horizonMin": 15,
-    "factLookbackMinutes": 90,
-    "minConfidence": 0.55,
-    "fixedOrderPrice": 0.4,
-    "maxOrderNotionalUsd": 2.5,
-    "providerMode": "single",
-    "maxProviderCount": 1,
-    "systemPrompt": "你是一个短周期市场事实分析器。\n你只能依据提供给你的事实包做判断，不允许补充未提供的新闻、链上事件或主观猜测。\n你的任务是预测未来 15 分钟标的方向，并输出结构化 JSON。\n除非输入字段明显缺失、无法解析，或者市场事实明显损坏，否则你必须给出 UP 或 DOWN。\n即使优势很弱，也要输出最可能方向，并把 confidence 调低。\ntradeable 只表示是否值得执行交易，不影响 direction 的输出。\n不要仅仅因为信号混合、波动小或可能已部分定价，就默认输出 ABSTAIN。",
-    "userPromptTemplate": "请基于下面的事实包，判断 {{coin}} 在未来 {{horizonMin}} 分钟的方向。\n你面对的是 Polymarket 的 Up/Down 市场，YES 表示 UP，NO 表示 DOWN。\n事实包如下：\n{{factsJson}}\n\n输出要求：\n1. direction 只能是 UP / DOWN / ABSTAIN；只有输入损坏或无法判断时才允许 ABSTAIN\n2. probUp 与 confidence 都必须在 0 到 1 之间\n3. 即使 tradeable=false，也必须给出最可能方向\n4. reasons 与 risks 要尽量简洁，聚焦事实，不要写空话\n5. 若 direction=ABSTAIN，则 tradeable 必须为 false",
+  "strategy": {
+    "fixedOrderPrice": 0.01,
+    "orderShareSize": 10,
     "targets": [
       {
-        "id": "BTC_15m",
+        "id": "BTC_5m",
         "enabled": true,
         "coin": "BTC",
-        "horizonMin": 15,
+        "horizonMin": 5,
         "symbol": "BTCUSDT"
       },
       {
-        "id": "ETH_15m",
+        "id": "ETH_5m",
         "enabled": true,
         "coin": "ETH",
-        "horizonMin": 15,
+        "horizonMin": 5,
         "symbol": "ETHUSDT"
       },
       {
-        "id": "SOL_15m",
+        "id": "SOL_5m",
         "enabled": true,
         "coin": "SOL",
-        "horizonMin": 15,
+        "horizonMin": 5,
         "symbol": "SOLUSDT"
       },
       {
-        "id": "XRP_15m",
+        "id": "XRP_5m",
         "enabled": true,
         "coin": "XRP",
-        "horizonMin": 15,
+        "horizonMin": 5,
         "symbol": "XRPUSDT"
-      }
-    ],
-    "providers": [
-      {
-        "id": "openai_gpt5_mini",
-        "enabled": false,
-        "priority": 1,
-        "label": "OpenAI GPT-5 mini",
-        "apiType": "openai_responses",
-        "model": "gpt-5-mini",
-        "baseUrl": "https://api.openai.com/v1",
-        "apiKeyEnvVar": "OPENAI_API_KEY",
-        "reasoningEffort": "low",
-        "temperature": 0.2,
-        "maxOutputTokens": 600,
-        "responseMode": "json_schema"
       },
       {
-        "id": "openai_gpt5",
-        "enabled": false,
-        "priority": 2,
-        "label": "OpenAI GPT-5",
-        "apiType": "openai_responses",
-        "model": "gpt-5",
-        "baseUrl": "https://api.openai.com/v1",
-        "apiKeyEnvVar": "OPENAI_API_KEY",
-        "reasoningEffort": "medium",
-        "temperature": 0.2,
-        "maxOutputTokens": 700,
-        "responseMode": "json_schema"
+        "id": "DOGE_5m",
+        "enabled": true,
+        "coin": "DOGE",
+        "horizonMin": 5,
+        "symbol": "DOGEUSDT"
       },
       {
-        "id": "compatible_vendor",
-        "enabled": false,
-        "priority": 3,
-        "label": "Compatible Vendor",
-        "apiType": "openai_chat_compatible",
-        "model": "your-model",
-        "baseUrl": "https://api.example.com/v1",
-        "apiKeyEnvVar": "COMPATIBLE_AI_API_KEY",
-        "reasoningEffort": "low",
-        "temperature": 0.2,
-        "maxOutputTokens": 600,
-        "responseMode": "json_object"
+        "id": "BNB_5m",
+        "enabled": true,
+        "coin": "BNB",
+        "horizonMin": 5,
+        "symbol": "BNBUSDT"
+      },
+      {
+        "id": "HYPE_5m",
+        "enabled": true,
+        "coin": "HYPE",
+        "horizonMin": 5,
+        "symbol": "HYPEUSDT"
       }
     ]
-  },
-  "marketFilter": {
-    "minMarketLiquidity": 300,
-    "minTimeToExpiryMin": 5,
-    "maxTimeToExpiryMin": 20,
-    "minEntrySeconds": 45
   },
   "network": {
     "polyHost": "https://clob.polymarket.com",

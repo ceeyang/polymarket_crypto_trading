@@ -1,5 +1,4 @@
 export type SideName = "YES" | "NO";
-export type PredictionDirection = "UP" | "DOWN" | "ABSTAIN";
 
 export interface GammaToken {
   token_id?: string;
@@ -47,111 +46,15 @@ export interface SelectedMarket {
   score: number;
 }
 
-export interface Prediction {
-  direction: PredictionDirection;
-  probUp: number;
-  confidence: number;
-  tradeable: boolean;
-  providerIds: string[];
-  providerLabel?: string;
-  summary?: string;
-  reasons?: string[];
-  risks?: string[];
-}
-
-export interface ProviderRequestMetadata {
-  submittedAt: string;
-  apiType: "openai_responses" | "openai_chat_compatible";
-  baseUrl: string;
-  endpoint: "/responses" | "/chat/completions";
-  model: string;
-  responseMode: "json_schema" | "json_object";
-  timeoutMs: number;
-  temperature?: number;
-  maxOutputTokens: number;
-  reasoningEffort?: "minimal" | "low" | "medium" | "high";
-  systemPromptChars: number;
-  userPromptChars: number;
-  factsJsonChars: number;
-  factTimestampUtc: string;
-  marketId: string;
-  promptPreview: {
-    system: string;
-    user: string;
-  };
-}
-
-export interface ProviderPredictionReport {
-  providerId: string;
-  providerLabel: string;
-  model: string;
-  requestMeta?: ProviderRequestMetadata;
-  direction?: PredictionDirection;
-  probUp?: number;
-  confidence?: number;
-  tradeable?: boolean;
-  summary?: string;
-  reasons?: string[];
-  risks?: string[];
-  rawText?: string;
-  latencyMs?: number;
-  error?: string;
-}
-
-export interface PredictionFactPack {
-  timestampUtc: string;
-  coin: string;
-  symbol: string;
-  horizonMin: number;
-  market: {
-    marketId: string;
-    conditionId: string;
-    title: string;
-    endDate: string;
-    minsLeft: number;
-    liquidity: number;
-    yesPrice: number;
-    noPrice: number;
-    tickSize: number;
-    fixedOrderPrice: number;
-  };
-  price: {
-    last: number;
-    changePct: {
-      m1: number | null;
-      m3: number | null;
-      m5: number | null;
-      m15: number | null;
-      m30: number | null;
-      m60: number | null;
-    };
-    rangePct: {
-      m5: number | null;
-      m15: number | null;
-      m30: number | null;
-    };
-    realizedVolPct: {
-      m5: number | null;
-      m15: number | null;
-      m30: number | null;
-    };
-    volumeRatio: {
-      m5Over30: number | null;
-      m15Over60: number | null;
-    };
-    recentCloses: number[];
-  };
-}
-
-export interface TradeDecision {
-  action: "BUY" | "SKIP";
-  reason: string;
-  side?: SideName;
-  tokenId?: string;
-  limitPrice?: number;
-  usdSize?: number;
-  shareSize?: number;
-  edge?: number;
+export interface StrategyExecutionMeta {
+  mode: "DUAL_SIDE_OPENING";
+  marketStartTime: string;
+  marketEndTime: string;
+  orderPrice: number;
+  orderShareSize: number;
+  plannedNotionalPerSideUsd: number;
+  plannedTotalNotionalUsd: number;
+  sides: SideName[];
 }
 
 export interface LiveTradeRecord {
@@ -177,11 +80,6 @@ export interface LiveTradeRecord {
   orderStatus?: string;
   officialPnlUsd?: number;
   settlementSource?: "BINANCE_PROXY" | "POLYMARKET_OFFICIAL" | "POLYMARKET_MARK_PRICE";
-  aiDirection?: PredictionDirection;
-  aiProbUp?: number;
-  aiConfidence?: number;
-  aiProviderIds?: string[];
-  aiSummary?: string;
 }
 
 export interface PredictionAuditRecord {
@@ -195,9 +93,7 @@ export interface PredictionAuditRecord {
   marketTitle: string;
   decisionAction: "BUY" | "SKIP";
   decisionReason: string;
-  aggregate: Prediction;
-  facts: PredictionFactPack;
-  providerReports: ProviderPredictionReport[];
+  strategyMeta?: StrategyExecutionMeta;
 }
 
 export interface BotState {
