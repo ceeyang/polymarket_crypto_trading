@@ -16,6 +16,10 @@ import { sleep } from "./utils.js";
 const LOG_FILE = path.resolve("state", "runtime.log");
 const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
 const LOG_TO_STDOUT = !["0", "false", "off", "no"].includes(String(process.env.LOG_TO_STDOUT || "1").trim().toLowerCase());
+const AUTO_CLAIM_MAX_RUNTIME_MS = Math.max(
+  60_000,
+  Math.floor(Number(process.env.AUTO_CLAIM_MAX_RUNTIME_MS || 10 * 60_000)),
+);
 
 function appendRuntimeLog(ts: string, msg: string, obj?: unknown): void {
   try {
@@ -700,6 +704,10 @@ interface RuntimeContext {
   activeTargets: MarketTarget[];
 }
 
+type AutoClaimRaceResult =
+  | { kind: "result"; summary: Awaited<ReturnType<typeof claimRedeemablePositions>> }
+  | { kind: "timeout" };
+
 export interface StartBotOptions {
   controlMode?: BotControlMode;
 }
@@ -756,6 +764,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
   let autoClaimInFlight = false;
+  let autoClaimRunSeq = 0;
   let lastScanEnabled: boolean | null = null;
 
   const reloadRuntime = async (reason: string): Promise<RuntimeContext> => {
@@ -837,15 +846,46 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       if (cfg.autoClaim && !cfg.dryRun && !autoClaimInFlight) {
         const nowMs = Date.now();
         if (nowMs - lastAutoClaimAtMs >= cfg.claimIntervalSec * 1000) {
+          const runId = ++autoClaimRunSeq;
           autoClaimInFlight = true;
           lastAutoClaimAtMs = nowMs;
           const cfgForClaim = cfg;
-          void claimRedeemablePositions(cfgForClaim, {
+          const startedAtMs = Date.now();
+          log("auto claim started", {
+            runId,
+            timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
+          });
+
+          const claimPromise = claimRedeemablePositions(cfgForClaim, {
             logPrefix: "[auto-claim]",
             quietNoop: true,
             maxConcurrency: 3,
-          })
-            .then((claimSummary) => {
+          });
+
+          // Keep the main trading loop independent from relayer latency. We bound
+          // the awaited window here so a slow or stuck redeem flow cannot stall
+          // future bot rounds or leave auto-claim permanently wedged.
+          claimPromise.catch((err) => {
+            log("auto claim late error", {
+              runId,
+              error: err instanceof Error ? err.message : err,
+            });
+          });
+
+          void Promise.race<AutoClaimRaceResult>([
+            claimPromise.then((summary) => ({ kind: "result", summary })),
+            sleep(AUTO_CLAIM_MAX_RUNTIME_MS).then(() => ({ kind: "timeout" as const })),
+          ])
+            .then((outcome) => {
+              if (outcome.kind === "timeout") {
+                log("auto claim timed out", {
+                  runId,
+                  timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
+                  elapsedMs: Date.now() - startedAtMs,
+                });
+                return;
+              }
+              const claimSummary = outcome.summary;
               if (claimSummary.reason !== "no redeemable condition ids") {
                 log("auto claim result", claimSummary);
               }
@@ -854,7 +894,9 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
               log("auto claim error", err instanceof Error ? err.message : err);
             })
             .finally(() => {
-              autoClaimInFlight = false;
+              if (runId === autoClaimRunSeq) {
+                autoClaimInFlight = false;
+              }
             });
         }
       }
