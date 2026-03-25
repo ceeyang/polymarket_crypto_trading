@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
@@ -16,12 +17,20 @@ import type { LiveTradeRecord } from "./types.js";
 
 const PORT = Number(process.env.WEB_PORT || 8787);
 const UI_FILE = path.resolve("src", "web-ui", "index.html");
+const LOGIN_UI_FILE = path.resolve("src", "web-ui", "login.html");
 const LOG_FILE = path.resolve("state", "runtime.log");
 const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
+const LOG_RETENTION_MS = 24 * 60 * 60 * 1000;
+const WEB_PASSWORD = String(process.env.WEB_PASSWORD || "").trim();
+const WEB_AUTH_ENABLED = WEB_PASSWORD.length > 0;
+const AUTH_COOKIE_NAME = "pm_bot_web_session";
+const AUTH_SESSION_TTL_MS = Math.max(30 * 60 * 1000, Math.floor(Number(process.env.WEB_SESSION_TTL_MS || 12 * 60 * 60 * 1000)));
+const AUTH_COOKIE_SECURE = ["1", "true", "yes", "on"].includes(String(process.env.WEB_SECURE_COOKIE || "").trim().toLowerCase());
 const stateStore = new StateStore();
 let accountCache: { ts: number; data: Awaited<ReturnType<typeof fetchAccountSummary>> } | null = null;
 const marketUrlCache = new Map<string, { ts: number; url: string }>();
 const MARKET_URL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const authSessions = new Map<string, number>();
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   res.statusCode = status;
@@ -35,6 +44,12 @@ function sendText(res: http.ServerResponse, status: number, contentType: string,
   res.end(body);
 }
 
+function redirect(res: http.ServerResponse, location: string, status = 302): void {
+  res.statusCode = status;
+  res.setHeader("Location", location);
+  res.end();
+}
+
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -44,10 +59,110 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
+function parseCookies(req: http.IncomingMessage): Record<string, string> {
+  const header = String(req.headers.cookie || "");
+  const pairs = header.split(";").map((part) => part.trim()).filter(Boolean);
+  const out: Record<string, string> = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    const key = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    if (!key) continue;
+    try {
+      out[key] = decodeURIComponent(value);
+    } catch {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function pruneAuthSessions(nowMs = Date.now()): void {
+  for (const [token, expiresAtMs] of authSessions.entries()) {
+    if (expiresAtMs <= nowMs) {
+      authSessions.delete(token);
+    }
+  }
+}
+
+function setAuthCookie(res: http.ServerResponse, token: string): void {
+  const parts = [
+    `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${Math.floor(AUTH_SESSION_TTL_MS / 1000)}`,
+  ];
+  if (AUTH_COOKIE_SECURE) {
+    parts.push("Secure");
+  }
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function clearAuthCookie(res: http.ServerResponse): void {
+  const parts = [
+    `${AUTH_COOKIE_NAME}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Max-Age=0",
+  ];
+  if (AUTH_COOKIE_SECURE) {
+    parts.push("Secure");
+  }
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function isAuthenticated(req: http.IncomingMessage): boolean {
+  if (!WEB_AUTH_ENABLED) return true;
+  pruneAuthSessions();
+  const token = parseCookies(req)[AUTH_COOKIE_NAME];
+  if (!token) return false;
+  const expiresAtMs = authSessions.get(token);
+  if (!expiresAtMs || expiresAtMs <= Date.now()) {
+    authSessions.delete(token);
+    return false;
+  }
+  authSessions.set(token, Date.now() + AUTH_SESSION_TTL_MS);
+  return true;
+}
+
+function requireWebAuth(req: http.IncomingMessage, res: http.ServerResponse, isApiRequest: boolean): boolean {
+  if (isAuthenticated(req)) return true;
+  if (isApiRequest) {
+    sendJson(res, 401, { error: "unauthorized" });
+  } else {
+    redirect(res, "/login");
+  }
+  return false;
+}
+
+function readHtmlFile(filePath: string, fallbackTitle: string): string {
+  if (fs.existsSync(filePath)) {
+    return fs.readFileSync(filePath, "utf8");
+  }
+  return `<!doctype html><html><head><meta charset="utf-8" /><title>${fallbackTitle}</title></head><body><h1>${fallbackTitle}</h1></body></html>`;
+}
+
+function isRetainedLogLine(line: string, cutoffMs: number): boolean {
+  try {
+    const parsed = JSON.parse(line);
+    const ts = Date.parse(String(parsed?.ts ?? ""));
+    return !Number.isFinite(ts) || ts >= cutoffMs;
+  } catch {
+    return true;
+  }
+}
+
 function tailLines(filePath: string, maxLines: number): string[] {
   if (!fs.existsSync(filePath)) return [];
   const raw = fs.readFileSync(filePath, "utf8");
-  const lines = raw.split(/\r?\n/).filter((x) => x.trim().length > 0);
+  const cutoffMs = Date.now() - LOG_RETENTION_MS;
+  const lines = raw
+    .split(/\r?\n/)
+    .filter((x) => x.trim().length > 0)
+    .filter((line) => isRetainedLogLine(line, cutoffMs));
   return lines.slice(-Math.max(1, maxLines));
 }
 
@@ -298,12 +413,65 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         ? pathnameRaw.slice(0, -1)
         : pathnameRaw;
 
+      if (method === "GET" && pathname === "/login") {
+        if (!WEB_AUTH_ENABLED || isAuthenticated(req)) {
+          redirect(res, "/");
+          return;
+        }
+        sendText(res, 200, "text/html; charset=utf-8", readHtmlFile(LOGIN_UI_FILE, "Login"));
+        return;
+      }
+
+      if (method === "GET" && pathname === "/api/auth/session") {
+        sendJson(res, 200, {
+          enabled: WEB_AUTH_ENABLED,
+          authenticated: isAuthenticated(req),
+        });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/api/auth/login") {
+        let payload: any;
+        try {
+          payload = JSON.parse(await readBody(req) || "{}");
+        } catch {
+          sendJson(res, 400, { error: "invalid JSON body" });
+          return;
+        }
+        if (!WEB_AUTH_ENABLED) {
+          sendJson(res, 200, { ok: true, enabled: false });
+          return;
+        }
+        if (String(payload?.password || "") !== WEB_PASSWORD) {
+          sendJson(res, 401, { error: "invalid password" });
+          return;
+        }
+        const token = crypto.randomBytes(24).toString("hex");
+        authSessions.set(token, Date.now() + AUTH_SESSION_TTL_MS);
+        setAuthCookie(res, token);
+        sendJson(res, 200, { ok: true, enabled: true });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/api/auth/logout") {
+        const token = parseCookies(req)[AUTH_COOKIE_NAME];
+        if (token) {
+          authSessions.delete(token);
+        }
+        clearAuthCookie(res);
+        sendJson(res, 200, { ok: true, enabled: WEB_AUTH_ENABLED });
+        return;
+      }
+
       if (method === "GET" && pathname === "/") {
-        const html = fs.existsSync(UI_FILE)
-          ? fs.readFileSync(UI_FILE, "utf8")
-          : "<h1>UI file not found</h1>";
+        if (!requireWebAuth(req, res, false)) return;
+        const html = readHtmlFile(UI_FILE, "Dashboard");
         sendText(res, 200, "text/html; charset=utf-8", html);
         return;
+      }
+
+      if (pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/")) {
+        if (!requireWebAuth(req, res, true)) return;
       }
 
       if (method === "GET" && pathname === "/api/bot/control") {

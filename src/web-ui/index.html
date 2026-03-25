@@ -75,6 +75,10 @@
         font-size: 13px;
       }
 
+      .hidden {
+        display: none !important;
+      }
+
       .hero-top, .scan-control, .toolbar, .row {
         display: flex;
         gap: 12px;
@@ -682,6 +686,7 @@
           <div class="row">
             <span class="pill" id="modePill">运行模式读取中...</span>
             <span class="pill" id="balanceInfo">余额读取中...</span>
+            <button class="secondary hidden" id="logoutBtn" type="button">退出登录</button>
           </div>
         </div>
 
@@ -934,6 +939,7 @@
       const cfgStatus = document.getElementById("cfgStatus");
       const balanceInfo = document.getElementById("balanceInfo");
       const modePill = document.getElementById("modePill");
+      const logoutBtn = document.getElementById("logoutBtn");
       const scanDot = document.getElementById("scanDot");
       const scanTitle = document.getElementById("scanTitle");
       const scanMeta = document.getElementById("scanMeta");
@@ -983,6 +989,15 @@
       function fmtPct(value) {
         const n = Number(value);
         return Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : "-";
+      }
+
+      async function apiFetch(input, init) {
+        const resp = await fetch(input, init);
+        if (resp.status === 401) {
+          window.location.href = "/login";
+          throw new Error("未登录或会话已过期");
+        }
+        return resp;
       }
 
       function compactId(value) {
@@ -1256,7 +1271,7 @@
       async function loadConfig() {
         cfgStatus.textContent = "加载中...";
         try {
-          const resp = await fetch("/api/config");
+          const resp = await apiFetch("/api/config");
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           fullConfig = data;
@@ -1272,7 +1287,7 @@
         cfgStatus.textContent = "保存中...";
         try {
           const payload = readFormToConfig();
-          const resp = await fetch("/api/config", {
+          const resp = await apiFetch("/api/config", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -1295,7 +1310,7 @@
           });
           if (tradeQuery.targetId) query.set("targetId", tradeQuery.targetId);
           if (tradeQuery.resolved) query.set("resolved", tradeQuery.resolved);
-          const resp = await fetch(`/api/trades?${query.toString()}`);
+          const resp = await apiFetch(`/api/trades?${query.toString()}`);
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           renderTradeSummary(data.summary || {});
@@ -1315,7 +1330,7 @@
         if (!ok) return;
         try {
           tradeStatus.textContent = "清空中...";
-          const resp = await fetch("/api/trades/clear", { method: "POST" });
+          const resp = await apiFetch("/api/trades/clear", { method: "POST" });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           tradeQuery.page = 1;
@@ -1328,7 +1343,7 @@
       async function loadPredictions() {
         try {
           const limit = Number(predictionLimit.value || "50");
-          const resp = await fetch(`/api/predictions?limit=${encodeURIComponent(limit)}`);
+          const resp = await apiFetch(`/api/predictions?limit=${encodeURIComponent(limit)}`);
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           renderPredictions(data.items || []);
@@ -1343,7 +1358,7 @@
         if (!ok) return;
         try {
           predictionStatus.textContent = "清空中...";
-          const resp = await fetch("/api/predictions/clear", { method: "POST" });
+          const resp = await apiFetch("/api/predictions/clear", { method: "POST" });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           await loadPredictions();
@@ -1362,7 +1377,7 @@
 
       async function loadAccount() {
         try {
-          const resp = await fetch("/api/account");
+          const resp = await apiFetch("/api/account");
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           balanceInfo.textContent = formatAccountText(data);
@@ -1375,7 +1390,7 @@
         try {
           claimBalanceBtn.disabled = true;
           balanceInfo.textContent = "赎回执行中...";
-          const resp = await fetch("/api/account/claim", { method: "POST" });
+          const resp = await apiFetch("/api/account/claim", { method: "POST" });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           balanceInfo.textContent = `${formatAccountText(data.account || {})} | 赎回: 成功${data?.claim?.success ?? 0}/失败${data?.claim?.failed ?? 0}`;
@@ -1390,7 +1405,7 @@
       async function loadLogs() {
         try {
           const tail = Number(tailInput.value || "200");
-          const resp = await fetch(`/api/logs?tail=${encodeURIComponent(tail)}`);
+          const resp = await apiFetch(`/api/logs?tail=${encodeURIComponent(tail)}`);
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           logArea.textContent = Array.isArray(data.lines) ? data.lines.join("\n") : "";
@@ -1403,7 +1418,7 @@
 
       async function clearLogs() {
         try {
-          const resp = await fetch("/api/logs/clear", { method: "POST" });
+          const resp = await apiFetch("/api/logs/clear", { method: "POST" });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           await loadLogs();
@@ -1423,7 +1438,7 @@
 
       async function loadBotControl() {
         try {
-          const resp = await fetch("/api/bot/control");
+          const resp = await apiFetch("/api/bot/control");
           const data = await resp.json();
           if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
           updateScanControl(data);
@@ -1435,7 +1450,7 @@
       async function toggleBotControl() {
         try {
           const currentOn = scanDot.classList.contains("on");
-          const resp = await fetch("/api/bot/control", {
+          const resp = await apiFetch("/api/bot/control", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ scanningEnabled: !currentOn }),
@@ -1445,6 +1460,25 @@
           updateScanControl(data);
         } catch (err) {
           scanMeta.textContent = `切换失败: ${String(err)}`;
+        }
+      }
+
+      async function loadAuthSession() {
+        try {
+          const resp = await fetch("/api/auth/session");
+          const data = await resp.json();
+          logoutBtn.classList.toggle("hidden", !data?.enabled);
+        } catch {
+          logoutBtn.classList.add("hidden");
+        }
+      }
+
+      async function logout() {
+        logoutBtn.disabled = true;
+        try {
+          await fetch("/api/auth/logout", { method: "POST" });
+        } finally {
+          window.location.href = "/login";
         }
       }
 
@@ -1463,6 +1497,7 @@
       document.getElementById("clearPredictionsBtn").addEventListener("click", clearPredictions);
       document.getElementById("refreshLogBtn").addEventListener("click", loadLogs);
       document.getElementById("clearLogBtn").addEventListener("click", clearLogs);
+      logoutBtn.addEventListener("click", logout);
       scanRefreshBtn.addEventListener("click", loadBotControl);
       scanToggleBtn.addEventListener("click", toggleBotControl);
       addOrderEntryBtn.addEventListener("click", () => {
@@ -1527,6 +1562,7 @@
 
       (async () => {
         setActiveTab(activeTab);
+        await loadAuthSession();
         await loadConfig();
         await loadTrades();
         await loadPredictions();

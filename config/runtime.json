@@ -25,6 +25,20 @@
         "symbol": "BTCUSDT"
       },
       {
+        "id": "BTC_15m",
+        "enabled": false,
+        "coin": "BTC",
+        "horizonMin": 15,
+        "symbol": "BTCUSDT"
+      },
+      {
+        "id": "BTC_60m",
+        "enabled": false,
+        "coin": "BTC",
+        "horizonMin": 60,
+        "symbol": "BTCUSDT"
+      },
+      {
         "id": "ETH_5m",
         "enabled": true,
         "coin": "ETH",
@@ -32,10 +46,38 @@
         "symbol": "ETHUSDT"
       },
       {
-        "id": "SOL_5m",
+        "id": "ETH_15m",
         "enabled": false,
+        "coin": "ETH",
+        "horizonMin": 15,
+        "symbol": "ETHUSDT"
+      },
+      {
+        "id": "ETH_60m",
+        "enabled": false,
+        "coin": "ETH",
+        "horizonMin": 60,
+        "symbol": "ETHUSDT"
+      },
+      {
+        "id": "SOL_5m",
+        "enabled": true,
         "coin": "SOL",
         "horizonMin": 5,
+        "symbol": "SOLUSDT"
+      },
+      {
+        "id": "SOL_15m",
+        "enabled": false,
+        "coin": "SOL",
+        "horizonMin": 15,
+        "symbol": "SOLUSDT"
+      },
+      {
+        "id": "SOL_60m",
+        "enabled": false,
+        "coin": "SOL",
+        "horizonMin": 60,
         "symbol": "SOLUSDT"
       },
       {
@@ -46,10 +88,38 @@
         "symbol": "XRPUSDT"
       },
       {
+        "id": "XRP_15m",
+        "enabled": false,
+        "coin": "XRP",
+        "horizonMin": 15,
+        "symbol": "XRPUSDT"
+      },
+      {
+        "id": "XRP_60m",
+        "enabled": false,
+        "coin": "XRP",
+        "horizonMin": 60,
+        "symbol": "XRPUSDT"
+      },
+      {
         "id": "DOGE_5m",
         "enabled": false,
         "coin": "DOGE",
         "horizonMin": 5,
+        "symbol": "DOGEUSDT"
+      },
+      {
+        "id": "DOGE_15m",
+        "enabled": false,
+        "coin": "DOGE",
+        "horizonMin": 15,
+        "symbol": "DOGEUSDT"
+      },
+      {
+        "id": "DOGE_60m",
+        "enabled": false,
+        "coin": "DOGE",
+        "horizonMin": 60,
         "symbol": "DOGEUSDT"
       },
       {
@@ -60,48 +130,6 @@
         "symbol": "BNBUSDT"
       },
       {
-        "id": "HYPE_5m",
-        "enabled": true,
-        "coin": "HYPE",
-        "horizonMin": 5,
-        "symbol": "HYPEUSDT"
-      },
-      {
-        "id": "BTC_15m",
-        "enabled": false,
-        "coin": "BTC",
-        "horizonMin": 15,
-        "symbol": "BTCUSDT"
-      },
-      {
-        "id": "ETH_15m",
-        "enabled": false,
-        "coin": "ETH",
-        "horizonMin": 15,
-        "symbol": "ETHUSDT"
-      },
-      {
-        "id": "SOL_15m",
-        "enabled": false,
-        "coin": "SOL",
-        "horizonMin": 15,
-        "symbol": "SOLUSDT"
-      },
-      {
-        "id": "XRP_15m",
-        "enabled": false,
-        "coin": "XRP",
-        "horizonMin": 15,
-        "symbol": "XRPUSDT"
-      },
-      {
-        "id": "DOGE_15m",
-        "enabled": false,
-        "coin": "DOGE",
-        "horizonMin": 15,
-        "symbol": "DOGEUSDT"
-      },
-      {
         "id": "BNB_15m",
         "enabled": false,
         "coin": "BNB",
@@ -109,53 +137,25 @@
         "symbol": "BNBUSDT"
       },
       {
-        "id": "HYPE_15m",
-        "enabled": false,
-        "coin": "HYPE",
-        "horizonMin": 15,
-        "symbol": "HYPEUSDT"
-      },
-      {
-        "id": "BTC_60m",
-        "enabled": false,
-        "coin": "BTC",
-        "horizonMin": 60,
-        "symbol": "BTCUSDT"
-      },
-      {
-        "id": "ETH_60m",
-        "enabled": false,
-        "coin": "ETH",
-        "horizonMin": 60,
-        "symbol": "ETHUSDT"
-      },
-      {
-        "id": "SOL_60m",
-        "enabled": false,
-        "coin": "SOL",
-        "horizonMin": 60,
-        "symbol": "SOLUSDT"
-      },
-      {
-        "id": "XRP_60m",
-        "enabled": false,
-        "coin": "XRP",
-        "horizonMin": 60,
-        "symbol": "XRPUSDT"
-      },
-      {
-        "id": "DOGE_60m",
-        "enabled": false,
-        "coin": "DOGE",
-        "horizonMin": 60,
-        "symbol": "DOGEUSDT"
-      },
-      {
         "id": "BNB_60m",
         "enabled": false,
         "coin": "BNB",
         "horizonMin": 60,
         "symbol": "BNBUSDT"
+      },
+      {
+        "id": "HYPE_5m",
+        "enabled": true,
+        "coin": "HYPE",
+        "horizonMin": 5,
+        "symbol": "HYPEUSDT"
+      },
+      {
+        "id": "HYPE_15m",
+        "enabled": false,
+        "coin": "HYPE",
+        "horizonMin": 15,
+        "symbol": "HYPEUSDT"
       },
       {
         "id": "HYPE_60m",

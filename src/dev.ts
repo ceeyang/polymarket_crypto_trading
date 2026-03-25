@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 const webPort = Number(process.env.WEB_PORT || 8787);
 const webUrl = `http://127.0.0.1:${webPort}`;
 

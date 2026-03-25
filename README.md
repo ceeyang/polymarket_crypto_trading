@@ -37,6 +37,9 @@ pnpm run build
 
 - `PRIVATE_KEY`
 - `FUNDER_ADDRESS`
+- `WEB_PASSWORD`
+- `WEB_SESSION_TTL_MS`（可选）
+- `WEB_SECURE_COOKIE`（可选，HTTPS 部署时建议开启）
 - `POLY_API_KEY`
 - `POLY_API_SECRET`
 - `POLY_API_PASSPHRASE`
@@ -75,6 +78,7 @@ pnpm run build
 
 当前 WebUI 提供：
 
+- 登录页密码保护
 - 模拟 / 实盘切换
 - 轮询间隔与自动赎回间隔
 - 多笔挂单价格与份数梯子
@@ -84,6 +88,8 @@ pnpm run build
 - 运行日志
 - 余额刷新 / 手动赎回
 - 扫描开关
+
+如果设置了 `WEB_PASSWORD`，访问 `/` 时会先进入登录页；登录成功后才能查看和操作 Web 控制台。这个保护只作用于 Web 访问层，不影响后台 bot 的持续运行。
 
 ## 当前示例配置
 

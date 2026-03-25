@@ -20,10 +20,41 @@ const AUTO_CLAIM_MAX_RUNTIME_MS = Math.max(
   60_000,
   Math.floor(Number(process.env.AUTO_CLAIM_MAX_RUNTIME_MS || 10 * 60_000)),
 );
+const LOG_RETENTION_MS = 24 * 60 * 60 * 1000;
+const LOG_PRUNE_INTERVAL_MS = 5 * 60 * 1000;
+let lastLogPruneAtMs = 0;
+
+function isLogLineRetained(line: string, cutoffMs: number): boolean {
+  try {
+    const parsed = JSON.parse(line);
+    const ts = Date.parse(String(parsed?.ts ?? ""));
+    return !Number.isFinite(ts) || ts >= cutoffMs;
+  } catch {
+    return true;
+  }
+}
+
+function pruneRuntimeLogFile(nowMs = Date.now()): void {
+  if (nowMs - lastLogPruneAtMs < LOG_PRUNE_INTERVAL_MS) return;
+  lastLogPruneAtMs = nowMs;
+
+  try {
+    if (!fs.existsSync(LOG_FILE)) return;
+    const cutoffMs = nowMs - LOG_RETENTION_MS;
+    const raw = fs.readFileSync(LOG_FILE, "utf8");
+    const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    const kept = lines.filter((line) => isLogLineRetained(line, cutoffMs));
+    if (kept.length === lines.length) return;
+    fs.writeFileSync(LOG_FILE, kept.join("\n") + (kept.length ? "\n" : ""), "utf8");
+  } catch {
+    // best effort
+  }
+}
 
 function appendRuntimeLog(ts: string, msg: string, obj?: unknown): void {
   try {
     fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+    pruneRuntimeLogFile();
     const payload = obj === undefined ? undefined : JSON.parse(JSON.stringify(obj));
     fs.appendFileSync(LOG_FILE, JSON.stringify({ ts, msg, data: payload }) + "\n", "utf8");
   } catch {
