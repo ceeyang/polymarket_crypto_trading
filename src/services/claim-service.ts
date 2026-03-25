@@ -312,6 +312,15 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   const rpcUrl = await pickWorkingRpcUrl(cfg.rpcUrls, cfg.chainId, logPrefix);
   const { client, txType } = createRelayClient(cfg, privateKey, rpcUrl);
+  const effectiveConcurrency = txType === RelayerTxType.SAFE ? 1 : maxConcurrency;
+
+  if (effectiveConcurrency !== maxConcurrency) {
+    log(logPrefix, "override concurrency for SAFE relayer", {
+      requested: maxConcurrency,
+      effective: effectiveConcurrency,
+      reason: "safe transactions must use sequential nonces",
+    });
+  }
 
   let success = 0;
   let failed = 0;
@@ -333,10 +342,10 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     }
   };
 
-  if (maxConcurrency <= 1 || conditionIds.length <= 1) {
+  if (effectiveConcurrency <= 1 || conditionIds.length <= 1) {
     await worker();
   } else {
-    const workers = Math.min(maxConcurrency, conditionIds.length);
+    const workers = Math.min(effectiveConcurrency, conditionIds.length);
     await Promise.all(Array.from({ length: workers }, async () => worker()));
   }
 
