@@ -677,6 +677,7 @@ interface PreparedOrder {
   symbol: string;
   best: SelectedMarket;
   side: SideName;
+  orderPlanIndex: number;
   tokenId: string;
   limitPrice: number;
   shareSize: number;
@@ -927,9 +928,24 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             return null;
           }
 
-          const shareSize = Number(mergedCfg.orderShareSize);
-          const limitPrice = Number(mergedCfg.fixedOrderPrice);
-          const plannedNotionalPerSideUsd = Number((shareSize * limitPrice).toFixed(6));
+          const orderEntries = mergedCfg.orderEntries
+            .map((entry) => ({
+              price: Number(entry.price),
+              shareSize: Number(entry.shareSize),
+            }))
+            .filter((entry) => Number.isFinite(entry.price) && entry.price > 0 && Number.isFinite(entry.shareSize) && entry.shareSize > 0);
+          if (!orderEntries.length) {
+            log(`[${label}] skip: no valid order entries`, { targetId: target.id });
+            return null;
+          }
+
+          const plannedOrderEntries = orderEntries.map((entry) => ({
+            price: Number(entry.price.toFixed(6)),
+            shareSize: Number(entry.shareSize.toFixed(6)),
+            plannedNotionalUsd: Number((entry.price * entry.shareSize).toFixed(6)),
+          }));
+          const plannedNotionalPerSideUsd = Number(plannedOrderEntries.reduce((sum, entry) => sum + entry.plannedNotionalUsd, 0).toFixed(6));
+          const ladderText = plannedOrderEntries.map((entry) => `${entry.price.toFixed(4)}x${entry.shareSize}`).join(", ");
           const audit: PredictionAuditRecord = {
             id: predictionAuditId(target.id, best.marketId),
             createdAt: new Date().toISOString(),
@@ -940,29 +956,32 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             marketId: best.marketId,
             marketTitle: best.title,
             decisionAction: "BUY",
-            decisionReason: `dual-sided opening orders at ${limitPrice.toFixed(4)} x ${shareSize}`,
+            decisionReason: `dual-sided ladder orders: ${ladderText}`,
             strategyMeta: {
               mode: "DUAL_SIDE_OPENING",
               marketStartTime: new Date(startInfo.startMs).toISOString(),
               marketEndTime: best.endDate,
-              orderPrice: Number(limitPrice.toFixed(6)),
-              orderShareSize: Number(shareSize.toFixed(6)),
+              orderPrice: plannedOrderEntries[0]?.price,
+              orderShareSize: plannedOrderEntries[0]?.shareSize,
+              orderEntries: plannedOrderEntries,
+              plannedOrderCount: plannedOrderEntries.length * 2,
               plannedNotionalPerSideUsd,
               plannedTotalNotionalUsd: Number((plannedNotionalPerSideUsd * 2).toFixed(6)),
               sides: ["YES", "NO"],
             },
           };
 
-          const orders: PreparedOrder[] = [
+          const orders: PreparedOrder[] = plannedOrderEntries.flatMap((entry, index) => ([
             {
               target,
               label,
               symbol,
               best,
               side: "YES",
+              orderPlanIndex: index,
               tokenId: best.yesTokenId,
-              limitPrice,
-              shareSize,
+              limitPrice: entry.price,
+              shareSize: entry.shareSize,
               entryRefPrice: best.yesPrice,
             },
             {
@@ -971,12 +990,13 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
               symbol,
               best,
               side: "NO",
+              orderPlanIndex: index,
               tokenId: best.noTokenId,
-              limitPrice,
-              shareSize,
+              limitPrice: entry.price,
+              shareSize: entry.shareSize,
               entryRefPrice: best.noPrice,
             },
-          ];
+          ]));
 
           return {
             audit,
@@ -1026,6 +1046,9 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
           log(`[${order.label}] order response`, {
             marketId: best.marketId,
             side: order.side,
+            orderPlanIndex: order.orderPlanIndex,
+            price: order.limitPrice,
+            shareSize: order.shareSize,
             response,
           });
 
@@ -1045,6 +1068,9 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
               entryRefPrice: order.entryRefPrice,
               entryPrice: order.limitPrice,
               entryNotionalUsd: Number((order.limitPrice * order.shareSize).toFixed(6)),
+              orderPlanIndex: order.orderPlanIndex,
+              orderPlanPrice: order.limitPrice,
+              orderPlanShareSize: order.shareSize,
               resolved: false,
               orderStatus: "DRY_RUN",
             });
@@ -1076,6 +1102,9 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             entryRefPrice: order.entryRefPrice,
             entryPrice: order.limitPrice,
             entryNotionalUsd: 0,
+            orderPlanIndex: order.orderPlanIndex,
+            orderPlanPrice: order.limitPrice,
+            orderPlanShareSize: order.shareSize,
             resolved: false,
             orderId,
             matchedSize: 0,

@@ -55,6 +55,27 @@ export function has5mHint(text: string): boolean {
   );
 }
 
+export function has15mHint(text: string): boolean {
+  const s = text.toLowerCase();
+  return (
+    /\b15m\b/.test(s)
+    || /\b15\s*min(?:ute)?s?\b/.test(s)
+    || /15分钟/.test(s)
+  );
+}
+
+export function has1hHint(text: string): boolean {
+  const s = text.toLowerCase();
+  return (
+    /\b1h\b/.test(s)
+    || /\b60m\b/.test(s)
+    || /\b60\s*min(?:ute)?s?\b/.test(s)
+    || /\b1\s*hour\b/.test(s)
+    || /1小时/.test(s)
+    || /60分钟/.test(s)
+  );
+}
+
 export function hasClockHint(text: string): boolean {
   return /\b\d{1,2}:\d{2}\b/.test(text);
 }

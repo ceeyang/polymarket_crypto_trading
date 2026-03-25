@@ -3,11 +3,14 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 
-export const MAX_TARGETS = 8;
+export const MAX_TARGETS = 24;
+export const MAX_ORDER_ENTRIES = 12;
 export const SUPPORTED_COINS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "HYPE"] as const;
-export const SUPPORTED_HORIZONS = [5] as const;
-export const DEFAULT_ORDER_PRICE = 0.01;
-export const DEFAULT_ORDER_SHARE_SIZE = 10;
+export const SUPPORTED_HORIZONS = [5, 15, 60] as const;
+export const DEFAULT_ORDER_ENTRIES = Object.freeze([
+  { price: 0.02, shareSize: 10 },
+  { price: 0.01, shareSize: 20 },
+]);
 
 export type SupportedCoin = (typeof SUPPORTED_COINS)[number];
 export type SupportedHorizon = (typeof SUPPORTED_HORIZONS)[number];
@@ -20,6 +23,11 @@ export interface MarketTarget {
   symbol: string;
 }
 
+export interface StrategyOrderEntry {
+  price: number;
+  shareSize: number;
+}
+
 export interface RuntimeConfigFile {
   runtime: {
     dryRun: boolean;
@@ -28,6 +36,7 @@ export interface RuntimeConfigFile {
     claimIntervalSec?: number;
   };
   strategy: {
+    orderEntries?: Partial<StrategyOrderEntry>[];
     fixedOrderPrice?: number;
     orderShareSize?: number;
     targets?: Partial<MarketTarget>[];
@@ -53,8 +62,7 @@ export interface Config {
   autoClaim: boolean;
   claimIntervalSec: number;
   horizonMin: SupportedHorizon;
-  fixedOrderPrice: number;
-  orderShareSize: number;
+  orderEntries: StrategyOrderEntry[];
   polyHost: string;
   gammaHost: string;
   dataApiHost: string;
@@ -104,6 +112,39 @@ function normalizeFixedOrderPrice(raw: unknown, fallback: number): number {
   return n;
 }
 
+function normalizeOrderEntries(rawEntries: Partial<StrategyOrderEntry>[] | undefined, fallbackPrice?: unknown, fallbackShareSize?: unknown): StrategyOrderEntry[] {
+  const fallbackOrder = {
+    price: Math.max(0.001, Math.min(0.99, normalizeFixedOrderPrice(fallbackPrice, DEFAULT_ORDER_ENTRIES[0].price))),
+    shareSize: parsePositiveNumber(fallbackShareSize, DEFAULT_ORDER_ENTRIES[0].shareSize),
+  };
+
+  const source = Array.isArray(rawEntries) && rawEntries.length > 0
+    ? rawEntries
+    : ((fallbackPrice != null || fallbackShareSize != null) ? [fallbackOrder] : DEFAULT_ORDER_ENTRIES);
+
+  const entries: StrategyOrderEntry[] = [];
+  for (let i = 0; i < source.length && entries.length < MAX_ORDER_ENTRIES; i += 1) {
+    const row = source[i] ?? {};
+    const priceRaw = typeof row === "object" && row && "price" in row ? row.price : fallbackOrder.price;
+    const shareRaw = typeof row === "object" && row && "shareSize" in row ? row.shareSize : fallbackOrder.shareSize;
+    const price = Math.max(0.001, Math.min(0.99, normalizeFixedOrderPrice(priceRaw, fallbackOrder.price)));
+    const shareSize = parsePositiveNumber(shareRaw, fallbackOrder.shareSize);
+    entries.push({
+      price: Number(price.toFixed(6)),
+      shareSize: Number(shareSize.toFixed(6)),
+    });
+  }
+
+  if (entries.length === 0) {
+    return DEFAULT_ORDER_ENTRIES.map((entry) => ({ ...entry }));
+  }
+
+  return entries.sort((a, b) => {
+    if (b.price !== a.price) return b.price - a.price;
+    return b.shareSize - a.shareSize;
+  });
+}
+
 function normalizeRelayerTxType(raw: string | undefined): "SAFE" | "PROXY" | null {
   if (!raw) return null;
   const v = raw.trim().toUpperCase();
@@ -128,38 +169,43 @@ export function getTargetId(coin: SupportedCoin, horizonMin: SupportedHorizon): 
 }
 
 function buildDefaultTargets(): MarketTarget[] {
-  return SUPPORTED_COINS.map((coin, idx) => ({
-    id: getTargetId(coin, 5),
-    enabled: idx === 0,
-    coin,
-    horizonMin: 5,
-    symbol: `${coin}USDT`,
-  }));
+  const out: MarketTarget[] = [];
+  for (const coin of SUPPORTED_COINS) {
+    for (const horizonMin of SUPPORTED_HORIZONS) {
+      out.push({
+        id: getTargetId(coin, horizonMin),
+        enabled: coin === "BTC" && horizonMin === 5,
+        coin,
+        horizonMin,
+        symbol: `${coin}USDT`,
+      });
+    }
+  }
+  return out;
 }
 
 function normalizeTargets(rawTargets: Partial<MarketTarget>[] | undefined): MarketTarget[] {
   const defaults = buildDefaultTargets();
   if (!Array.isArray(rawTargets) || rawTargets.length === 0) return defaults;
 
-  const out: MarketTarget[] = [];
-  const seen = new Set<string>();
-  for (let i = 0; i < rawTargets.length && out.length < MAX_TARGETS; i += 1) {
+  const byId = new Map(defaults.map((target) => [target.id, { ...target }]));
+  for (let i = 0; i < rawTargets.length; i += 1) {
     const t = rawTargets[i] ?? {};
     const coin = normalizeCoin(t.coin, "BTC");
     const horizonMin = normalizeHorizon(t.horizonMin, 5);
     const id = typeof t.id === "string" && t.id.trim() ? t.id.trim() : getTargetId(coin, horizonMin);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push({
+    const prev = byId.get(id);
+    const next: MarketTarget = {
       id,
       enabled: Boolean(t.enabled),
       coin,
       horizonMin,
       symbol: typeof t.symbol === "string" && t.symbol.trim() ? t.symbol.trim().toUpperCase() : `${coin}USDT`,
-    });
+    };
+    byId.set(id, prev ? { ...prev, ...next } : next);
   }
 
-  return out.length > 0 ? out : defaults;
+  return Array.from(byId.values()).slice(0, MAX_TARGETS);
 }
 
 export function readRuntimeConfig(): RuntimeConfigFile {
@@ -167,13 +213,35 @@ export function readRuntimeConfig(): RuntimeConfigFile {
     throw new Error(`Missing runtime config file: ${RUNTIME_CONFIG_PATH}`);
   }
   const raw = fs.readFileSync(RUNTIME_CONFIG_PATH, "utf8");
-  return JSON.parse(raw) as RuntimeConfigFile;
+  return normalizeRuntimeConfigFile(JSON.parse(raw) as RuntimeConfigFile);
 }
 
 export function writeRuntimeConfig(next: RuntimeConfigFile): void {
   const dir = path.dirname(RUNTIME_CONFIG_PATH);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(RUNTIME_CONFIG_PATH, JSON.stringify(next, null, 2), "utf8");
+  fs.writeFileSync(RUNTIME_CONFIG_PATH, JSON.stringify(normalizeRuntimeConfigFile(next), null, 2), "utf8");
+}
+
+function normalizeRuntimeConfigFile(input: RuntimeConfigFile): RuntimeConfigFile {
+  return {
+    runtime: {
+      dryRun: input.runtime?.dryRun !== false,
+      pollIntervalSec: parsePositiveInt(input.runtime?.pollIntervalSec, 20),
+      autoClaim: input.runtime?.autoClaim !== false,
+      claimIntervalSec: parsePositiveInt(input.runtime?.claimIntervalSec, 300),
+    },
+    strategy: {
+      orderEntries: normalizeOrderEntries(input.strategy?.orderEntries, input.strategy?.fixedOrderPrice, input.strategy?.orderShareSize),
+      targets: normalizeTargets(input.strategy?.targets),
+    },
+    network: {
+      ...input.network,
+      rpcUrls: Array.from(new Set([
+        ...(Array.isArray(input.network?.rpcUrls) ? input.network.rpcUrls : []),
+        String(input.network?.rpcUrl || "").trim(),
+      ].map((x) => String(x || "").trim()).filter(Boolean))),
+    },
+  };
 }
 
 export function loadConfig(): Config {
@@ -198,8 +266,7 @@ export function loadConfig(): Config {
     autoClaim: rc.runtime.autoClaim !== false,
     claimIntervalSec: parsePositiveInt(rc.runtime.claimIntervalSec, 300),
     horizonMin: 5,
-    fixedOrderPrice: Math.max(0.001, Math.min(0.99, normalizeFixedOrderPrice(rc.strategy.fixedOrderPrice, DEFAULT_ORDER_PRICE))),
-    orderShareSize: parsePositiveNumber(rc.strategy.orderShareSize, DEFAULT_ORDER_SHARE_SIZE),
+    orderEntries: normalizeOrderEntries(rc.strategy.orderEntries, rc.strategy.fixedOrderPrice, rc.strategy.orderShareSize),
     polyHost: rc.network.polyHost,
     gammaHost: rc.network.gammaHost,
     dataApiHost: rc.network.dataApiHost,

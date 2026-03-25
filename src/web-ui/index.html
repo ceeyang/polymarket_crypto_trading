@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Polymarket Dual-Side Dashboard</title>
+    <title>Polymarket Dual-Side Multi-Horizon Dashboard</title>
     <style>
       @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap");
 
@@ -527,9 +527,130 @@
         word-break: break-word;
       }
 
+      .order-ladder-shell {
+        display: grid;
+        gap: 12px;
+      }
+
+      .order-ladder-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .order-ladder-summary {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #d6dfeb;
+        background: linear-gradient(180deg, rgba(247, 251, 255, 0.98), rgba(240, 247, 255, 0.9));
+        color: #315170;
+        font-size: 13px;
+      }
+
+      .order-ladder-table {
+        width: 100%;
+        overflow: auto;
+      }
+
+      .order-ladder-table table {
+        min-width: 480px;
+      }
+
+      .row-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .ghost-btn {
+        background: #fff;
+        color: #355173;
+        border-color: #ccd8eb;
+      }
+
+      .spec-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .spec-card {
+        padding: 14px;
+        border: 1px solid #d6dfeb;
+        border-radius: 14px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 251, 255, 0.94));
+      }
+
+      .spec-label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .spec-value {
+        margin-top: 6px;
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--text);
+        line-height: 1.35;
+      }
+
+      .runtime-stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .target-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+      }
+
+      .target-option {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 52px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid #dbe4f0;
+        background: rgba(255, 255, 255, 0.95);
+      }
+
+      .target-option input {
+        flex: 0 0 auto;
+      }
+
+      .target-option-copy {
+        display: grid;
+        gap: 2px;
+      }
+
+      .target-option-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text);
+      }
+
+      .target-option-meta {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
       @media (max-width: 1100px) {
         .grid-2, .grid-3, .stats, .trade-summary, .trade-hero {
           grid-template-columns: 1fr;
+        }
+        .target-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 720px) {
+        .target-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
 
@@ -555,8 +676,8 @@
       <section class="card hero">
         <div class="hero-top">
           <div>
-            <h1>Polymarket Dual-Side 5m Bot</h1>
-            <div class="muted">每个 5 分钟盘口开盘时同时挂 YES / NO 双边单，到期自动撤未成交余单。默认建议先用模拟模式。</div>
+            <h1>Polymarket Dual-Side Multi-Horizon Bot</h1>
+            <div class="muted">支持 5 分钟、15 分钟和 1 小时盘口；每个盘口周期内同时挂 YES / NO 双边单，到期自动撤未成交余单。</div>
           </div>
           <div class="row">
             <span class="pill" id="modePill">运行模式读取中...</span>
@@ -600,7 +721,7 @@
           </div>
         </div>
 
-        <div class="grid-3" style="margin-top: 14px;">
+        <div class="runtime-stack" style="margin-top: 14px;">
           <div class="section">
             <h2>运行参数</h2>
             <div class="grid-2" style="margin-top: 12px;">
@@ -613,29 +734,56 @@
 
           <div class="section">
             <h2>挂单参数</h2>
-            <div class="grid-2" style="margin-top: 12px;">
-              <div class="field"><label>盘口周期</label><input type="text" value="5 分钟" disabled /></div>
-              <div class="field"><label>周期规则</label><input type="text" value="当前盘口周期内仅挂单一次" disabled /></div>
-              <div class="field"><label for="fixedOrderPrice">挂单价格</label><input id="fixedOrderPrice" type="number" min="0.001" max="0.99" step="0.001" /></div>
-              <div class="field"><label for="orderShareSize">每边挂单份数</label><input id="orderShareSize" type="number" min="1" step="1" /></div>
-              <div class="field"><label>下单模式</label><input type="text" value="YES / NO 双边同挂" disabled /></div>
-              <div class="field"><label>到期处理</label><input type="text" value="撤销未成交余单" disabled /></div>
+            <div class="spec-grid" style="margin-top: 12px; margin-bottom: 12px;">
+              <div class="spec-card">
+                <div class="spec-label">支持周期</div>
+                <div class="spec-value">5 分钟 / 15 分钟 / 1 小时</div>
+              </div>
+              <div class="spec-card">
+                <div class="spec-label">周期规则</div>
+                <div class="spec-value">当前盘口周期内每个目标仅挂单一次</div>
+              </div>
+              <div class="spec-card">
+                <div class="spec-label">下单模式</div>
+                <div class="spec-value">YES / NO 双边同挂，可配置多笔订单</div>
+              </div>
+              <div class="spec-card">
+                <div class="spec-label">到期处理</div>
+                <div class="spec-value">撤销未成交余单</div>
+              </div>
+            </div>
+            <div class="order-ladder-shell">
+              <div class="order-ladder-head">
+                <div>
+                  <div style="font-weight: 600;">挂单梯子</div>
+                  <div class="muted">默认每个方向挂两笔：`0.02 x 10` 和 `0.01 x 20`。支持追加更多档位，保存后下一轮生效。</div>
+                </div>
+                <div class="row-actions">
+                  <span class="order-ladder-summary" id="orderLadderSummary">单边总额 $0.40 / 双边总额 $0.80</span>
+                  <button type="button" class="secondary" id="addOrderEntryBtn">新增挂单</button>
+                </div>
+              </div>
+              <div class="order-ladder-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>价格</th>
+                      <th>份数</th>
+                      <th>单边金额</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="orderEntriesBody"></tbody>
+                </table>
+              </div>
             </div>
           </div>
 
           <div class="section">
-            <h2>5m 目标</h2>
-            <div class="muted" style="margin: 4px 0 10px;">当前只保留 5 分钟维度，启用目标会参与轮询。</div>
-            <table>
-              <thead>
-                <tr>
-                  <th>启用</th>
-                  <th>目标</th>
-                  <th>交易对</th>
-                </tr>
-              </thead>
-              <tbody id="targetsBody"></tbody>
-            </table>
+            <h2>目标盘口</h2>
+            <div class="muted" style="margin: 4px 0 10px;">支持 5m / 15m / 1h，直接选择要参与轮询的币种周期组合。</div>
+            <div id="targetsBody" class="target-grid"></div>
           </div>
         </div>
 
@@ -643,7 +791,7 @@
           <h2>策略说明</h2>
           <div class="muted" style="margin-top: 8px;">
             当前版本只做固定双边挂单，不再做 AI 判断、趋势判断或额外风控拦截。
-            Bot 会在每个 5m 盘口的当前周期内，只对每个目标执行一次双边挂单：
+            Bot 会在每个 5m / 15m / 1h 盘口的当前周期内，只对每个目标执行一次双边挂单：
             YES 与 NO 会按当前配置的价格与份数挂单；盘口结束后自动撤销未成交余单，并按设定间隔自动赎回收益。
           </div>
         </div>
@@ -745,10 +893,10 @@
                 <th>时间</th>
                 <th>目标</th>
                 <th>市场</th>
-                <th>计划</th>
-                <th>价格</th>
-                <th>份数</th>
+                <th>挂单梯子</th>
+                <th>订单数</th>
                 <th>单边金额</th>
+                <th>双边金额</th>
                 <th>动作</th>
                 <th>说明</th>
               </tr>
@@ -778,6 +926,10 @@
       let fullConfig = null;
       let activeTab = "runtime";
       const tradeQuery = { page: 1, pageSize: 20, targetId: "", resolved: "" };
+      const DEFAULT_ORDER_ENTRIES = [
+        { price: 0.02, shareSize: 10 },
+        { price: 0.01, shareSize: 20 },
+      ];
 
       const cfgStatus = document.getElementById("cfgStatus");
       const balanceInfo = document.getElementById("balanceInfo");
@@ -789,6 +941,9 @@
       const scanRefreshBtn = document.getElementById("scanRefreshBtn");
       const claimBalanceBtn = document.getElementById("claimBalanceBtn");
       const targetsBody = document.getElementById("targetsBody");
+      const orderEntriesBody = document.getElementById("orderEntriesBody");
+      const orderLadderSummary = document.getElementById("orderLadderSummary");
+      const addOrderEntryBtn = document.getElementById("addOrderEntryBtn");
       const tradesBody = document.getElementById("tradesBody");
       const tradeStatus = document.getElementById("tradeStatus");
       const tradeTarget = document.getElementById("tradeTarget");
@@ -848,6 +1003,74 @@
         return Number.isFinite(n) ? n : fallback;
       }
 
+      function normalizeOrderPrice(raw, fallback = 0.01) {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n <= 0) return fallback;
+        const scaled = n > 1 && n <= 100 ? n / 100 : n;
+        return Math.max(0.001, Math.min(0.99, Number(scaled.toFixed(6))));
+      }
+
+      function normalizeOrderShareSize(raw, fallback = 10) {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n <= 0) return fallback;
+        return Math.max(1, Number(n.toFixed(6)));
+      }
+
+      function cloneDefaultOrderEntries() {
+        return DEFAULT_ORDER_ENTRIES.map((entry) => ({ ...entry }));
+      }
+
+      function getConfigOrderEntries(cfg) {
+        const entries = Array.isArray(cfg?.strategy?.orderEntries) ? cfg.strategy.orderEntries : [];
+        if (entries.length) {
+          return entries.map((entry) => ({
+            price: normalizeOrderPrice(entry?.price, 0.01),
+            shareSize: normalizeOrderShareSize(entry?.shareSize, 10),
+          }));
+        }
+        if (cfg?.strategy?.fixedOrderPrice || cfg?.strategy?.orderShareSize) {
+          return [{
+            price: normalizeOrderPrice(cfg?.strategy?.fixedOrderPrice, 0.01),
+            shareSize: normalizeOrderShareSize(cfg?.strategy?.orderShareSize, 10),
+          }];
+        }
+        return cloneDefaultOrderEntries();
+      }
+
+      function readRenderedOrderEntries() {
+        const rows = Array.from(orderEntriesBody.querySelectorAll("tr"));
+        const entries = rows.map((row) => ({
+          price: normalizeOrderPrice(row.querySelector(".order-entry-price")?.value, 0.01),
+          shareSize: normalizeOrderShareSize(row.querySelector(".order-entry-share")?.value, 10),
+        }));
+        return entries.length ? entries : cloneDefaultOrderEntries();
+      }
+
+      function updateOrderLadderSummary(entries) {
+        const list = Array.isArray(entries) && entries.length ? entries : cloneDefaultOrderEntries();
+        const perSide = list.reduce((sum, entry) => sum + (Number(entry.price) * Number(entry.shareSize)), 0);
+        const bothSides = perSide * 2;
+        orderLadderSummary.textContent = `单边总额 $${perSide.toFixed(4)} / 双边总额 $${bothSides.toFixed(4)} / ${list.length * 2} 笔总单`;
+      }
+
+      function renderOrderEntries(entries) {
+        const list = Array.isArray(entries) && entries.length ? entries : cloneDefaultOrderEntries();
+        orderEntriesBody.innerHTML = "";
+        list.forEach((entry, index) => {
+          const row = document.createElement("tr");
+          const notional = Number(entry.price) * Number(entry.shareSize);
+          row.innerHTML = `
+            <td>${index + 1}</td>
+            <td><input class="order-entry-price" type="number" min="0.001" max="0.99" step="0.001" value="${escapeHtml(entry.price)}" /></td>
+            <td><input class="order-entry-share" type="number" min="1" step="1" value="${escapeHtml(entry.shareSize)}" /></td>
+            <td>$${notional.toFixed(4)}</td>
+            <td><button type="button" class="ghost-btn order-entry-remove">删除</button></td>
+          `;
+          orderEntriesBody.appendChild(row);
+        });
+        updateOrderLadderSummary(list);
+      }
+
       function setActiveTab(tab) {
         activeTab = tab;
         document.querySelectorAll(".tab-btn").forEach((btn) => {
@@ -858,21 +1081,43 @@
         });
       }
 
+      function horizonLabel(horizonMin) {
+        const n = Number(horizonMin);
+        if (n === 60) return "1H";
+        return `${n}M`;
+      }
+
       function renderTargets(targets) {
         targetsBody.innerHTML = "";
         const list = Array.isArray(targets) ? targets : [];
         if (!list.length) {
-          targetsBody.innerHTML = '<tr><td colspan="3" class="muted">暂无目标</td></tr>';
+          targetsBody.innerHTML = '<div class="muted">暂无目标</div>';
           return;
         }
-        for (const [idx, target] of list.entries()) {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td><input class="target-enabled" data-idx="${idx}" type="checkbox" ${target.enabled ? "checked" : ""} /></td>
-            <td>${escapeHtml(`${target.coin || "-"}-5M`)}</td>
-            <td><input class="target-symbol" data-idx="${idx}" type="text" value="${escapeHtml(target.symbol || "")}" /></td>
+        const horizonOrder = new Map([[5, 0], [15, 1], [60, 2]]);
+        const sorted = list
+          .map((target, idx) => ({ target, idx }))
+          .sort((a, b) => {
+            const horizonA = horizonOrder.get(Number(a.target?.horizonMin || 0)) ?? 99;
+            const horizonB = horizonOrder.get(Number(b.target?.horizonMin || 0)) ?? 99;
+            if (horizonA !== horizonB) return horizonA - horizonB;
+            const coinA = String(a.target?.coin || "");
+            const coinB = String(b.target?.coin || "");
+            return coinA.localeCompare(coinB);
+          });
+
+        for (const { target, idx } of sorted) {
+          const card = document.createElement("label");
+          card.className = "target-option";
+          const label = `${String(target.coin || "-")}-${horizonLabel(target.horizonMin)}`;
+          card.innerHTML = `
+            <input class="target-enabled" data-idx="${idx}" type="checkbox" ${target.enabled ? "checked" : ""} />
+            <div class="target-option-copy">
+              <div class="target-option-title">${escapeHtml(label)}</div>
+              <div class="target-option-meta">可选盘口</div>
+            </div>
           `;
-          targetsBody.appendChild(tr);
+          targetsBody.appendChild(card);
         }
       }
 
@@ -882,7 +1127,7 @@
         for (const target of Array.isArray(targets) ? targets : []) {
           const opt = document.createElement("option");
           opt.value = target.id || "";
-          opt.textContent = `${target.coin || "-"}-5M`;
+          opt.textContent = `${target.coin || "-"}-${horizonLabel(target.horizonMin)}`;
           tradeTarget.appendChild(opt);
         }
         tradeTarget.value = prev;
@@ -917,7 +1162,10 @@
           const orderIdLabel = orderIdRaw
             ? `<span class="code-chip" title="${escapeHtml(orderIdRaw)}">${escapeHtml(compactId(orderIdRaw))}</span>`
             : "-";
-          const marketSub = trade.targetId || trade.symbol || "-";
+          const ladderHint = Number.isFinite(Number(trade.orderPlanPrice)) && Number.isFinite(Number(trade.orderPlanShareSize))
+            ? `#${Number(trade.orderPlanIndex ?? 0) + 1} ${fmtNumber(trade.orderPlanPrice, 4)} x ${fmtNumber(trade.orderPlanShareSize, 0)}`
+            : "";
+          const marketSub = [trade.targetId || "-", ladderHint].filter(Boolean).join(" | ");
           tr.innerHTML = `
             <td class="market-cell">
               <div class="cell-title">${titleHtml}</div>
@@ -943,18 +1191,25 @@
         for (const item of items) {
           const tr = document.createElement("tr");
           const strategy = item?.strategyMeta || {};
-          const orderPrice = strategy?.orderPrice;
-          const shareSize = strategy?.orderShareSize;
+          const entries = Array.isArray(strategy?.orderEntries) && strategy.orderEntries.length
+            ? strategy.orderEntries
+            : ((strategy?.orderPrice && strategy?.orderShareSize)
+              ? [{ price: strategy.orderPrice, shareSize: strategy.orderShareSize, plannedNotionalUsd: (strategy.orderPrice * strategy.orderShareSize) }]
+              : []);
           const perSideUsd = strategy?.plannedNotionalPerSideUsd;
-          const plannedSides = Array.isArray(strategy?.sides) ? strategy.sides.join(" / ") : "YES / NO";
+          const totalUsd = strategy?.plannedTotalNotionalUsd;
+          const orderCount = strategy?.plannedOrderCount ?? (entries.length * 2);
+          const ladderText = entries.length
+            ? entries.map((entry) => `${fmtNumber(entry?.price, 4)} x ${fmtNumber(entry?.shareSize, 0)}`).join(" / ")
+            : "-";
           tr.innerHTML = `
             <td>${fmtTime(item?.createdAt)}</td>
             <td>${escapeHtml(item?.targetId || "-")}</td>
             <td>${escapeHtml(item?.marketTitle || item?.marketId || "-")}</td>
-            <td>${escapeHtml(plannedSides)}</td>
-            <td>${fmtNumber(orderPrice, 4)}</td>
-            <td>${fmtNumber(shareSize, 0)}</td>
+            <td>${escapeHtml(ladderText)}</td>
+            <td>${fmtNumber(orderCount, 0)}</td>
             <td>${fmtNumber(perSideUsd, 4)}</td>
+            <td>${fmtNumber(totalUsd, 4)}</td>
             <td>${escapeHtml(item?.decisionAction || "-")} / ${escapeHtml(item?.decisionReason || "")}</td>
             <td>${escapeHtml(item?.marketId || "-")}</td>
           `;
@@ -965,8 +1220,7 @@
       function fillForm(cfg) {
         setValue("pollIntervalSec", cfg.runtime.pollIntervalSec);
         setValue("claimIntervalSec", cfg.runtime.claimIntervalSec ?? 300);
-        setValue("fixedOrderPrice", cfg.strategy.fixedOrderPrice ?? 0.01);
-        setValue("orderShareSize", cfg.strategy.orderShareSize ?? 10);
+        renderOrderEntries(getConfigOrderEntries(cfg));
         document.getElementById("dryRun").checked = Boolean(cfg.runtime.dryRun);
         document.getElementById("autoClaim").checked = Boolean(cfg.runtime.autoClaim);
         renderTargets(cfg.strategy.targets || []);
@@ -982,13 +1236,6 @@
           if (!target) return;
           target.enabled = Boolean(el.checked);
         });
-        const symbols = document.querySelectorAll(".target-symbol");
-        symbols.forEach((el) => {
-          const idx = Number(el.getAttribute("data-idx"));
-          const target = next.strategy.targets?.[idx];
-          if (!target) return;
-          target.symbol = String(el.value || "").trim().toUpperCase() || target.symbol;
-        });
       }
 
       function readFormToConfig() {
@@ -997,9 +1244,9 @@
         next.runtime.autoClaim = document.getElementById("autoClaim").checked;
         next.runtime.pollIntervalSec = Math.max(5, Math.round(num("pollIntervalSec", next.runtime.pollIntervalSec || 20)));
         next.runtime.claimIntervalSec = Math.max(30, Math.round(num("claimIntervalSec", next.runtime.claimIntervalSec || 300)));
-        const fixedOrderPriceRaw = num("fixedOrderPrice", next.strategy.fixedOrderPrice ?? 0.01);
-        next.strategy.fixedOrderPrice = Math.max(0.001, Math.min(0.99, fixedOrderPriceRaw > 1 && fixedOrderPriceRaw <= 100 ? fixedOrderPriceRaw / 100 : fixedOrderPriceRaw));
-        next.strategy.orderShareSize = Math.max(1, Math.round(num("orderShareSize", next.strategy.orderShareSize ?? 10)));
+        next.strategy.orderEntries = readRenderedOrderEntries();
+        delete next.strategy.fixedOrderPrice;
+        delete next.strategy.orderShareSize;
 
         readTargets(next);
 
@@ -1218,6 +1465,36 @@
       document.getElementById("clearLogBtn").addEventListener("click", clearLogs);
       scanRefreshBtn.addEventListener("click", loadBotControl);
       scanToggleBtn.addEventListener("click", toggleBotControl);
+      addOrderEntryBtn.addEventListener("click", () => {
+        const entries = readRenderedOrderEntries();
+        entries.push({ price: 0.01, shareSize: 10 });
+        renderOrderEntries(entries);
+      });
+      orderEntriesBody.addEventListener("click", (event) => {
+        const btn = event.target instanceof HTMLElement ? event.target.closest(".order-entry-remove") : null;
+        if (!btn) return;
+        const rows = Array.from(orderEntriesBody.querySelectorAll("tr"));
+        const row = btn.closest("tr");
+        const nextEntries = rows
+          .filter((candidate) => candidate !== row)
+          .map((candidate) => ({
+            price: normalizeOrderPrice(candidate.querySelector(".order-entry-price")?.value, 0.01),
+            shareSize: normalizeOrderShareSize(candidate.querySelector(".order-entry-share")?.value, 10),
+          }));
+        renderOrderEntries(nextEntries.length ? nextEntries : cloneDefaultOrderEntries());
+      });
+      orderEntriesBody.addEventListener("input", (event) => {
+        const row = event.target instanceof HTMLElement ? event.target.closest("tr") : null;
+        if (row) {
+          const price = normalizeOrderPrice(row.querySelector(".order-entry-price")?.value, 0.01);
+          const shareSize = normalizeOrderShareSize(row.querySelector(".order-entry-share")?.value, 10);
+          const amountCell = row.children[3];
+          if (amountCell) {
+            amountCell.textContent = `$${(price * shareSize).toFixed(4)}`;
+          }
+        }
+        updateOrderLadderSummary(readRenderedOrderEntries());
+      });
 
       tradeTarget.addEventListener("change", async () => {
         tradeQuery.targetId = tradeTarget.value || "";

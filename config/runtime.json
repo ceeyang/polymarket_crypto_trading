@@ -6,12 +6,20 @@
     "claimIntervalSec": 300
   },
   "strategy": {
-    "fixedOrderPrice": 0.01,
-    "orderShareSize": 10,
+    "orderEntries": [
+      {
+        "price": 0.02,
+        "shareSize": 6
+      },
+      {
+        "price": 0.01,
+        "shareSize": 12
+      }
+    ],
     "targets": [
       {
         "id": "BTC_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "BTC",
         "horizonMin": 5,
         "symbol": "BTCUSDT"
@@ -25,28 +33,28 @@
       },
       {
         "id": "SOL_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "SOL",
         "horizonMin": 5,
         "symbol": "SOLUSDT"
       },
       {
         "id": "XRP_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "XRP",
         "horizonMin": 5,
         "symbol": "XRPUSDT"
       },
       {
         "id": "DOGE_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "DOGE",
         "horizonMin": 5,
         "symbol": "DOGEUSDT"
       },
       {
         "id": "BNB_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "BNB",
         "horizonMin": 5,
         "symbol": "BNBUSDT"
@@ -56,6 +64,104 @@
         "enabled": true,
         "coin": "HYPE",
         "horizonMin": 5,
+        "symbol": "HYPEUSDT"
+      },
+      {
+        "id": "BTC_15m",
+        "enabled": false,
+        "coin": "BTC",
+        "horizonMin": 15,
+        "symbol": "BTCUSDT"
+      },
+      {
+        "id": "ETH_15m",
+        "enabled": false,
+        "coin": "ETH",
+        "horizonMin": 15,
+        "symbol": "ETHUSDT"
+      },
+      {
+        "id": "SOL_15m",
+        "enabled": false,
+        "coin": "SOL",
+        "horizonMin": 15,
+        "symbol": "SOLUSDT"
+      },
+      {
+        "id": "XRP_15m",
+        "enabled": false,
+        "coin": "XRP",
+        "horizonMin": 15,
+        "symbol": "XRPUSDT"
+      },
+      {
+        "id": "DOGE_15m",
+        "enabled": false,
+        "coin": "DOGE",
+        "horizonMin": 15,
+        "symbol": "DOGEUSDT"
+      },
+      {
+        "id": "BNB_15m",
+        "enabled": false,
+        "coin": "BNB",
+        "horizonMin": 15,
+        "symbol": "BNBUSDT"
+      },
+      {
+        "id": "HYPE_15m",
+        "enabled": false,
+        "coin": "HYPE",
+        "horizonMin": 15,
+        "symbol": "HYPEUSDT"
+      },
+      {
+        "id": "BTC_60m",
+        "enabled": false,
+        "coin": "BTC",
+        "horizonMin": 60,
+        "symbol": "BTCUSDT"
+      },
+      {
+        "id": "ETH_60m",
+        "enabled": false,
+        "coin": "ETH",
+        "horizonMin": 60,
+        "symbol": "ETHUSDT"
+      },
+      {
+        "id": "SOL_60m",
+        "enabled": false,
+        "coin": "SOL",
+        "horizonMin": 60,
+        "symbol": "SOLUSDT"
+      },
+      {
+        "id": "XRP_60m",
+        "enabled": false,
+        "coin": "XRP",
+        "horizonMin": 60,
+        "symbol": "XRPUSDT"
+      },
+      {
+        "id": "DOGE_60m",
+        "enabled": false,
+        "coin": "DOGE",
+        "horizonMin": 60,
+        "symbol": "DOGEUSDT"
+      },
+      {
+        "id": "BNB_60m",
+        "enabled": false,
+        "coin": "BNB",
+        "horizonMin": 60,
+        "symbol": "BNBUSDT"
+      },
+      {
+        "id": "HYPE_60m",
+        "enabled": false,
+        "coin": "HYPE",
+        "horizonMin": 60,
         "symbol": "HYPEUSDT"
       }
     ]

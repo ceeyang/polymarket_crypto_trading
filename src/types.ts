@@ -1,5 +1,11 @@
 export type SideName = "YES" | "NO";
 
+export interface StrategyOrderPlanEntry {
+  price: number;
+  shareSize: number;
+  plannedNotionalUsd: number;
+}
+
 export interface GammaToken {
   token_id?: string;
   tokenId?: string;
@@ -50,8 +56,10 @@ export interface StrategyExecutionMeta {
   mode: "DUAL_SIDE_OPENING";
   marketStartTime: string;
   marketEndTime: string;
-  orderPrice: number;
-  orderShareSize: number;
+  orderPrice?: number;
+  orderShareSize?: number;
+  orderEntries: StrategyOrderPlanEntry[];
+  plannedOrderCount: number;
   plannedNotionalPerSideUsd: number;
   plannedTotalNotionalUsd: number;
   sides: SideName[];
@@ -72,6 +80,9 @@ export interface LiveTradeRecord {
   entryRefPrice: number;
   entryPrice?: number;
   entryNotionalUsd?: number;
+  orderPlanIndex?: number;
+  orderPlanPrice?: number;
+  orderPlanShareSize?: number;
   resolved?: boolean;
   win?: boolean;
   settleRefPrice?: number;

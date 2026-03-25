@@ -7,7 +7,7 @@ import { URL, fileURLToPath } from "node:url";
 import axios from "axios";
 import { Wallet } from "ethers";
 
-import { MAX_TARGETS, loadConfig, readRuntimeConfig, writeRuntimeConfig, type RuntimeConfigFile } from "./config.js";
+import { MAX_ORDER_ENTRIES, MAX_TARGETS, loadConfig, readRuntimeConfig, writeRuntimeConfig, type RuntimeConfigFile } from "./config.js";
 import { PolymarketTrader } from "./clients/polymarket.js";
 import { readBotControlState, resolveBotControlMode, writeBotControlState } from "./services/bot-control.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
@@ -251,6 +251,10 @@ function validateRuntimeConfig(payload: unknown): { ok: true; data: RuntimeConfi
   const targets = data.strategy.targets;
   if (Array.isArray(targets) && targets.length > MAX_TARGETS) {
     return { ok: false, error: `strategy.targets exceeds ${MAX_TARGETS}` };
+  }
+  const orderEntries = data.strategy.orderEntries;
+  if (Array.isArray(orderEntries) && orderEntries.length > MAX_ORDER_ENTRIES) {
+    return { ok: false, error: `strategy.orderEntries exceeds ${MAX_ORDER_ENTRIES}` };
   }
   return { ok: true, data };
 }

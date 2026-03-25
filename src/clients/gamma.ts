@@ -2,7 +2,7 @@ import axios from "axios";
 
 import type { Config, MarketTarget, SupportedCoin, SupportedHorizon } from "../config.js";
 import type { GammaMarket, SelectedMarket } from "../types.js";
-import { has5mHint, hasClockHint, hasEthKeyword, minutesUntil, parseJsonArray, toNum } from "../utils.js";
+import { has1hHint, has15mHint, has5mHint, hasClockHint, hasEthKeyword, minutesUntil, parseJsonArray, toNum } from "../utils.js";
 
 export class GammaClient {
   constructor(private readonly config: Config) {}
@@ -276,13 +276,15 @@ export class GammaClient {
     const intervalSec = horizonMin * 60;
     const anchor = Math.ceil(nowSec / intervalSec) * intervalSec;
     const prefixes = this.slugPrefixesForCoin(coin);
-    const horizonTag = `${horizonMin}m`;
     const slugs: string[] = [];
+    const horizonTags = this.horizonSlugTags(horizonMin);
 
     for (let i = -2; i <= 6; i += 1) {
       const ts = anchor + i * intervalSec;
       for (const p of prefixes) {
-        slugs.push(`${p}-updown-${horizonTag}-${ts}`);
+        for (const horizonTag of horizonTags) {
+          slugs.push(`${p}-updown-${horizonTag}-${ts}`);
+        }
       }
     }
 
@@ -411,6 +413,17 @@ export class GammaClient {
     if (horizonMin === 5) {
       return has5mHint(s);
     }
+    if (horizonMin === 15) {
+      return has15mHint(s);
+    }
+    if (horizonMin === 60) {
+      return has1hHint(s);
+    }
     return false;
+  }
+
+  private horizonSlugTags(horizonMin: SupportedHorizon): string[] {
+    if (horizonMin === 60) return ["1h", "60m"];
+    return [`${horizonMin}m`];
   }
 }

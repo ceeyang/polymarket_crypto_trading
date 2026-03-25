@@ -1,12 +1,12 @@
-# Polymarket Dual-Side 5m Bot
+# Polymarket Dual-Side Multi-Horizon Bot
 
 一个基于 TypeScript 的 Polymarket 双边挂单机器人。
 
 当前版本只做一件事：
 
-- 可同时启用多个币种的 `5m` 盘口
+- 可同时启用多个币种的 `5m / 15m / 1h` 盘口
 - 每个盘口当前周期内，只下单一次
-- `YES` 和 `NO` 都按当前配置的价格与份数同时挂单，默认 `$0.01`、`10` 份
+- `YES` 和 `NO` 都按当前配置的多档价格与份数同时挂单，默认两档：`$0.02 x 10`、`$0.01 x 20`
 - 盘口结束后自动撤销未成交余单
 - 已成交仓位等待官方结果结算
 - 按固定间隔自动赎回收益
@@ -51,9 +51,9 @@ pnpm run build
 
 ## 当前下单策略
 
-- 周期：`5m`
-- 默认每边挂单价格：`$0.01`
-- 默认每边挂单份数：`10`
+- 周期：`5m / 15m / 1h`
+- 默认每边双档挂单：`$0.02 x 10`、`$0.01 x 20`
+- 支持在 WebUI 自定义多笔挂单
 - 每个目标每个盘口只执行一次
 - 盘口结束后撤销未成交余单
 
@@ -67,8 +67,7 @@ pnpm run build
 - `runtime.pollIntervalSec`
 - `runtime.autoClaim`
 - `runtime.claimIntervalSec`
-- `strategy.fixedOrderPrice`
-- `strategy.orderShareSize`
+- `strategy.orderEntries`
 - `strategy.targets`
 - `network.*`
 
@@ -78,8 +77,8 @@ pnpm run build
 
 - 模拟 / 实盘切换
 - 轮询间隔与自动赎回间隔
-- 挂单价格与每边份数
-- 多币种目标启停
+- 多笔挂单价格与份数梯子
+- 多币种多周期目标启停
 - 最近周期执行记录
 - 交易记录
 - 运行日志
@@ -90,9 +89,8 @@ pnpm run build
 
 当前仓库里的 [config/runtime.json](/Users/cee/Desktop/codex/polymarket_crypto_trading/config/runtime.json) 示例值：
 
-- 启用 `BTC / ETH / SOL / XRP / DOGE / BNB / HYPE`
-- `strategy.fixedOrderPrice=0.01`
-- `strategy.orderShareSize=10`
+- 默认保留 `BTC / ETH / SOL / XRP / DOGE / BNB / HYPE` 的多周期目标列表
+- `strategy.orderEntries=[{price:0.02,shareSize:10},{price:0.01,shareSize:20}]`
 - `dryRun=false`
 - `pollIntervalSec=20`
 - `autoClaim=true`
