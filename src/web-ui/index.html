@@ -562,6 +562,16 @@
         min-width: 480px;
       }
 
+      .order-ladder-table th,
+      .order-ladder-table td {
+        vertical-align: middle;
+      }
+
+      .order-ladder-table input[type="number"] {
+        width: 100px;
+        box-sizing: border-box;
+      }
+
       .row-actions {
         display: flex;
         align-items: center;
@@ -761,7 +771,7 @@
               <div class="order-ladder-head">
                 <div>
                   <div style="font-weight: 600;">挂单梯子</div>
-                  <div class="muted">默认每个方向挂两笔：`0.02 x 10` 和 `0.01 x 20`。支持追加更多档位，保存后下一轮生效。</div>
+                  <div class="muted">默认每个方向挂两笔：`0.02 x 10` 和 `0.01 x 20`。支持追加更多档位，保存后下一轮生效。每行可单独设置预计40次双边次数。</div>
                 </div>
                 <div class="row-actions">
                   <span class="order-ladder-summary" id="orderLadderSummary">单边总额 $0.40 / 双边总额 $0.80</span>
@@ -775,7 +785,11 @@
                       <th>#</th>
                       <th>价格</th>
                       <th>份数</th>
+                      <th title="该价位每天预计双边次数（可独立配置）">预计双边/天</th>
                       <th>单边金额</th>
+                      <th title="双边都被吃时净利润">双边净利润</th>
+                      <th title="按预计双边次数计算的该行每日期望">行日期望</th>
+                      <th title="赢1次双边能覆盖多少次单边亏损">赢1次覆盖N次单边</th>
                       <th>操作</th>
                     </tr>
                   </thead>
@@ -1057,15 +1071,112 @@
         const entries = rows.map((row) => ({
           price: normalizeOrderPrice(row.querySelector(".order-entry-price")?.value, 0.01),
           shareSize: normalizeOrderShareSize(row.querySelector(".order-entry-share")?.value, 10),
+          evFills: normalizeEvFills(row.querySelector(".order-entry-ev-fills")?.value, 7),
         }));
         return entries.length ? entries : cloneDefaultOrderEntries();
       }
 
-      function updateOrderLadderSummary(entries) {
-        const list = Array.isArray(entries) && entries.length ? entries : cloneDefaultOrderEntries();
+      // === EV Stats (based on corrected dual-side fill model) ===
+      // Every 5-min window: losing side ALWAYS fills (288/day).
+      // Double-fill (both YES+NO) observed by tier individually.
+      // Single-fill (one side, loss) = 288 - doubleFills per tier.
+      const EV_CYCLES_PER_DAY = 288;
+
+      function normalizeEvFills(raw, fallback) {
+        const n = Number(raw);
+        return Number.isFinite(n) && n >= 1 && n <= 288 ? Math.floor(n) : (fallback ?? 7);
+      }
+
+      function getRowEvFills(row) {
+        return normalizeEvFills(row?.querySelector('.order-entry-ev-fills')?.value, 7);
+      }
+
+      // Cascade EV Model:
+      // Tiers sorted by fill-frequency DESC (= price DESC).
+      // exclusive_fills[i] = fills[i] - fills[i+1]  (events that reach EXACTLY this depth)
+      // cascade_doubleNet[i] = sum(doubleNet[0..i])  (all tiers that ALSO fire at this depth)
+      // row_dayEv[i] = exclusive_fills[i] × cascade_doubleNet[i]
+      //              - (288 - fills[i]) × singleCost[i]
+      function computeCascadeStats() {
+        const rows = Array.from(orderEntriesBody.querySelectorAll('tr'));
+        const tiers = rows.map(row => ({
+          row,
+          price:   normalizeOrderPrice(row.querySelector('.order-entry-price')?.value, 0.01),
+          shares:  normalizeOrderShareSize(row.querySelector('.order-entry-share')?.value, 10),
+          evFills: normalizeEvFills(row.querySelector('.order-entry-ev-fills')?.value, 7),
+        })).map(t => ({ ...t,
+          notional:  t.price * t.shares,
+          doubleNet: t.shares * (1 - 2 * t.price),
+        }));
+
+        // Sort by fill frequency DESC (highest price fires most often)
+        const sorted = [...tiers].sort((a, b) => b.evFills - a.evFills);
+
+        // Running cascade doubleNet (sum of all tiers firing at or shallower depth)
+        let cascadeAccum = 0;
+        const stats = sorted.map((tier, i) => {
+          cascadeAccum += tier.doubleNet;
+          const nextFills   = i + 1 < sorted.length ? sorted[i + 1].evFills : 0;
+          const exclusiveFills = Math.max(0, tier.evFills - nextFills);
+          const singleEvents   = EV_CYCLES_PER_DAY - tier.evFills;
+          const rowDayEv       = exclusiveFills * cascadeAccum - singleEvents * tier.notional;
+          return { tier, exclusiveFills, cascadeAccum, rowDayEv };
+        });
+
+        const totalDayEv     = stats.reduce((s, r) => s + r.rowDayEv, 0);
+        const worstDayLoss   = tiers.reduce((s, t) => s + t.notional * EV_CYCLES_PER_DAY, 0);
+        // minDoubles: minimum total fills across tiers needed per day for EV > 0
+        // Approximate: solved from worstDayLoss / average cascade doubleNet
+        const avgCascadeNet  = stats.length ? stats.reduce((s, r) => s + r.cascadeAccum, 0) / stats.length : 1;
+        const minDoubles     = avgCascadeNet > 0 ? Math.ceil(worstDayLoss / avgCascadeNet) : 0;
+        return { stats, tiers, totalDayEv, worstDayLoss, minDoubles };
+      }
+
+      // Applies cascade EV values to all rendered rows simultaneously
+      function updateAllRowEvStats() {
+        const { stats } = computeCascadeStats();
+        // stats are sorted by evFills DESC; match back to original DOM rows via tier.row reference
+        for (const s of stats) {
+          const row = s.tier.row;
+          const { notional, doubleNet } = s.tier;
+          const coverCount  = notional > 0 ? (doubleNet / notional).toFixed(1) : '∞';
+          const evColor     = s.rowDayEv >= 0 ? '#067647' : '#b42318';
+          const doubleColor = doubleNet  >= 0 ? '#067647' : '#b42318';
+          // col indices: 0=# 1=price 2=share 3=evFills 4=notional 5=doubleNet 6=rowDayEv 7=cover 8=action
+          if (row.children[4]) row.children[4].textContent = `$${notional.toFixed(4)}`;
+          if (row.children[5]) { row.children[5].textContent = `+$${doubleNet.toFixed(4)}`; row.children[5].style.color = doubleColor; }
+          if (row.children[6]) {
+            const label = `${s.rowDayEv >= 0 ? '+' : ''}$${s.rowDayEv.toFixed(2)}/天`;
+            const title = `独属触发${s.exclusiveFills}次 × 级联盈利$${s.cascadeAccum.toFixed(2)} − 单边${EV_CYCLES_PER_DAY - s.tier.evFills}次 × $${notional.toFixed(4)}`;
+            row.children[6].textContent = label;
+            row.children[6].style.color = evColor;
+            row.children[6].title = title;
+          }
+          if (row.children[7]) row.children[7].textContent = `${coverCount}次`;
+        }
+        updateOrderLadderSummary();
+      }
+
+      function calcLadderEv() {
+        const { totalDayEv, worstDayLoss, minDoubles } = computeCascadeStats();
+        return { normalDayEv: totalDayEv, worstDayLoss, minDoubles };
+      }
+
+      function updateOrderLadderSummary() {
+        const list = readRenderedOrderEntries(); // Read from DOM to get current values
         const perSide = list.reduce((sum, entry) => sum + (Number(entry.price) * Number(entry.shareSize)), 0);
         const bothSides = perSide * 2;
-        orderLadderSummary.textContent = `单边总额 $${perSide.toFixed(4)} / 双边总额 $${bothSides.toFixed(4)} / ${list.length * 2} 笔总单`;
+        const ev = calcLadderEv();
+        const evColor = ev.normalDayEv >= 0 ? '#067647' : '#b42318';
+        const worstColor = ev.worstDayLoss > 70 ? '#b42318' : '#315170';
+        orderLadderSummary.innerHTML = [
+          `单边总额 $${perSide.toFixed(4)}`,
+          `双边总额 $${bothSides.toFixed(4)}`,
+          `${list.length * 2} 笔总单`,
+          `<span style="color:${worstColor};font-weight:600" title="最坏情况下一天内（0次双边）的最大亏损">🛡 最坏日亏损 $${ev.worstDayLoss.toFixed(2)}</span>`,
+          `<span style="color:${evColor};font-weight:600" title="按各行预计双边数分别计算后汇总">📈 综合日期望 ${ev.normalDayEv >= 0 ? '+' : ''}$${ev.normalDayEv.toFixed(2)}</span>`,
+          `<span style="color:#315170" title="每天至少需要几次双边才能实现正期望">⚡ 至少${Math.ceil(ev.minDoubles)}次双边才正收益</span>`,
+        ].join(' / ');
       }
 
       function renderOrderEntries(entries) {
@@ -1073,17 +1184,30 @@
         orderEntriesBody.innerHTML = "";
         list.forEach((entry, index) => {
           const row = document.createElement("tr");
-          const notional = Number(entry.price) * Number(entry.shareSize);
+          const price    = Number(entry.price);
+          const shares   = Number(entry.shareSize);
+          const evFills  = normalizeEvFills(entry.evFills, 7);
+          const notional  = price * shares;
+          const doubleNet = shares * (1 - 2 * price);
+          const coverCount = notional > 0 ? (doubleNet / notional).toFixed(1) : '∞';
+          const doubleColor = doubleNet >= 0 ? '#067647' : '#b42318';
+          // rowDayEv and cascade will be recalculated properly by updateAllRowEvStats below
           row.innerHTML = `
             <td>${index + 1}</td>
             <td><input class="order-entry-price" type="number" min="0.001" max="0.99" step="0.001" value="${escapeHtml(entry.price)}" /></td>
             <td><input class="order-entry-share" type="number" min="1" step="1" value="${escapeHtml(entry.shareSize)}" /></td>
+            <td><input class="order-entry-ev-fills" type="number" min="1" max="288" step="1" value="${evFills}"
+              title="该价位每天预计双边被吃次数"
+            /></td>
             <td>$${notional.toFixed(4)}</td>
+            <td style="color:${doubleColor};font-weight:600">+$${doubleNet.toFixed(4)}</td>
+            <td style="color:#888;font-weight:600" title="行日期望（包含级联盈利）">计算中...</td>
+            <td style="color:#315170;font-weight:600" title="赢1次双边能覆盖几次单边亏损">${coverCount}次</td>
             <td><button type="button" class="ghost-btn order-entry-remove">删除</button></td>
           `;
           orderEntriesBody.appendChild(row);
         });
-        updateOrderLadderSummary(list);
+        updateAllRowEvStats(); // Apply cascade model to all rows
       }
 
       function setActiveTab(tab) {
@@ -1513,22 +1637,15 @@
         const nextEntries = rows
           .filter((candidate) => candidate !== row)
           .map((candidate) => ({
-            price: normalizeOrderPrice(candidate.querySelector(".order-entry-price")?.value, 0.01),
+            price:     normalizeOrderPrice(candidate.querySelector(".order-entry-price")?.value, 0.01),
             shareSize: normalizeOrderShareSize(candidate.querySelector(".order-entry-share")?.value, 10),
+            evFills:   normalizeEvFills(candidate.querySelector(".order-entry-ev-fills")?.value, 7),
           }));
         renderOrderEntries(nextEntries.length ? nextEntries : cloneDefaultOrderEntries());
       });
-      orderEntriesBody.addEventListener("input", (event) => {
-        const row = event.target instanceof HTMLElement ? event.target.closest("tr") : null;
-        if (row) {
-          const price = normalizeOrderPrice(row.querySelector(".order-entry-price")?.value, 0.01);
-          const shareSize = normalizeOrderShareSize(row.querySelector(".order-entry-share")?.value, 10);
-          const amountCell = row.children[3];
-          if (amountCell) {
-            amountCell.textContent = `$${(price * shareSize).toFixed(4)}`;
-          }
-        }
-        updateOrderLadderSummary(readRenderedOrderEntries());
+      orderEntriesBody.addEventListener("input", () => {
+        // Any change in any row requires recalculating ALL rows (cascade model)
+        updateAllRowEvStats();
       });
 
       tradeTarget.addEventListener("change", async () => {

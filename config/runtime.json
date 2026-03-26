@@ -9,11 +9,11 @@
     "orderEntries": [
       {
         "price": 0.02,
-        "shareSize": 6
+        "shareSize": 5
       },
       {
         "price": 0.01,
-        "shareSize": 12
+        "shareSize": 10
       }
     ],
     "targets": [
@@ -61,7 +61,7 @@
       },
       {
         "id": "SOL_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "SOL",
         "horizonMin": 5,
         "symbol": "SOLUSDT"
@@ -145,7 +145,7 @@
       },
       {
         "id": "HYPE_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "HYPE",
         "horizonMin": 5,
         "symbol": "HYPEUSDT"

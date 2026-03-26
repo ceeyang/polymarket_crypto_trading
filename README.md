@@ -6,7 +6,7 @@
 
 - 可同时启用多个币种的 `5m / 15m / 1h` 盘口
 - 每个盘口当前周期内，只下单一次
-- `YES` 和 `NO` 都按当前配置的多档价格与份数同时挂单，默认两档：`$0.02 x 10`、`$0.01 x 20`
+- `YES` 和 `NO` 都按当前配置的多档价格与份数同时挂单，默认三档阶梯：`$0.10 x 15`、`$0.05 x 20`、`$0.02 x 50`
 - 盘口结束后自动撤销未成交余单
 - 已成交仓位等待官方结果结算
 - 按固定间隔自动赎回收益
@@ -55,7 +55,7 @@ pnpm run build
 ## 当前下单策略
 
 - 周期：`5m / 15m / 1h`
-- 默认每边双档挂单：`$0.02 x 10`、`$0.01 x 20`
+- 默认每边三档阶梯挂单：`$0.10 x 15`、`$0.05 x 20`、`$0.02 x 50`
 - 支持在 WebUI 自定义多笔挂单
 - 每个目标每个盘口只执行一次
 - 盘口结束后撤销未成交余单
@@ -96,7 +96,7 @@ pnpm run build
 当前仓库里的 [config/runtime.json](/Users/cee/Desktop/codex/polymarket_crypto_trading/config/runtime.json) 示例值：
 
 - 默认保留 `BTC / ETH / SOL / XRP / DOGE / BNB / HYPE` 的多周期目标列表
-- `strategy.orderEntries=[{price:0.02,shareSize:10},{price:0.01,shareSize:20}]`
+- `strategy.orderEntries=[{price:0.10,shareSize:15},{price:0.05,shareSize:20},{price:0.02,shareSize:50}]`
 - `dryRun=false`
 - `pollIntervalSec=20`
 - `autoClaim=true`

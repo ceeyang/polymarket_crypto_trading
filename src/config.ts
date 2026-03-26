@@ -8,8 +8,9 @@ export const MAX_ORDER_ENTRIES = 12;
 export const SUPPORTED_COINS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "HYPE"] as const;
 export const SUPPORTED_HORIZONS = [5, 15, 60] as const;
 export const DEFAULT_ORDER_ENTRIES = Object.freeze([
-  { price: 0.02, shareSize: 10 },
-  { price: 0.01, shareSize: 20 },
+  { price: 0.10, shareSize: 15 },
+  { price: 0.05, shareSize: 20 },
+  { price: 0.02, shareSize: 50 },
 ]);
 
 export type SupportedCoin = (typeof SUPPORTED_COINS)[number];
