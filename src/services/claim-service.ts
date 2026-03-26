@@ -1,6 +1,12 @@
 import axios from "axios";
 import { Wallet, ethers } from "ethers";
-import { RelayClient, RelayerTxType, type Transaction } from "@polymarket/builder-relayer-client";
+import {
+  RelayClient,
+  RelayerTransactionState,
+  RelayerTxType,
+  type RelayerTransaction,
+  type Transaction,
+} from "@polymarket/builder-relayer-client";
 import { BuilderConfig } from "@polymarket/builder-signing-sdk";
 import { createWalletClient, encodeFunctionData, http, isAddress, type Hex, zeroHash } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -9,6 +15,16 @@ import { polygon } from "viem/chains";
 import type { Config } from "../config.js";
 
 const LOG_TO_STDOUT = !["0", "false", "off", "no"].includes(String(process.env.LOG_TO_STDOUT || "1").trim().toLowerCase());
+const CLAIM_WAIT_TIMEOUT_MS = Math.max(60_000, Math.floor(Number(process.env.CLAIM_WAIT_TIMEOUT_MS || 20 * 60_000)));
+const CLAIM_WAIT_POLL_MS = Math.max(1_000, Math.floor(Number(process.env.CLAIM_WAIT_POLL_MS || 3_000)));
+const RELAYER_SUCCESS_STATES = new Set<string>([
+  RelayerTransactionState.STATE_MINED,
+  RelayerTransactionState.STATE_CONFIRMED,
+]);
+const RELAYER_FAILED_STATES = new Set<string>([
+  RelayerTransactionState.STATE_FAILED,
+  RelayerTransactionState.STATE_INVALID,
+]);
 
 const CTF_REDEEM_ABI = [
   {
@@ -113,6 +129,93 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientNetworkError(err: unknown): boolean {
+  const message = getErrorMessage(err).toLowerCase();
+  return [
+    "econnreset",
+    "etimedout",
+    "timeout",
+    "socket hang up",
+    "network error",
+    "temporarily unavailable",
+    "502",
+    "503",
+    "504",
+  ].some((token) => message.includes(token));
+}
+
+function pickLatestTransaction(txns: RelayerTransaction[]): RelayerTransaction | null {
+  if (!Array.isArray(txns) || txns.length === 0) return null;
+  const sorted = [...txns].sort((a, b) => {
+    const timeA = Date.parse(String(a?.updatedAt ?? a?.createdAt ?? 0));
+    const timeB = Date.parse(String(b?.updatedAt ?? b?.createdAt ?? 0));
+    return timeB - timeA;
+  });
+  return sorted[0] ?? null;
+}
+
+async function waitForTransactionState(
+  client: RelayClient,
+  transactionId: string,
+  conditionId: string,
+  logPrefix: string,
+  timeoutMs = CLAIM_WAIT_TIMEOUT_MS,
+): Promise<RelayerTransaction> {
+  const startedAt = Date.now();
+  let lastLoggedState = "";
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const txns = await client.getTransaction(transactionId);
+      const txn = pickLatestTransaction(txns);
+      if (txn) {
+        const state = String(txn.state || "");
+        if (state && state !== lastLoggedState) {
+          lastLoggedState = state;
+          log(logPrefix, "relayer state", {
+            conditionId,
+            transactionID: transactionId,
+            state,
+            txHash: txn.transactionHash,
+          });
+        }
+        if (RELAYER_SUCCESS_STATES.has(state)) {
+          return txn;
+        }
+        if (RELAYER_FAILED_STATES.has(state)) {
+          throw new Error(`Relayer transaction failed with state=${state} txHash=${txn.transactionHash || "-"}`);
+        }
+      }
+    } catch (err) {
+      if (!isTransientNetworkError(err)) {
+        throw err;
+      }
+      log(logPrefix, "relayer poll transient error", {
+        conditionId,
+        transactionID: transactionId,
+        error: getErrorMessage(err),
+      });
+    }
+
+    await sleep(CLAIM_WAIT_POLL_MS);
+  }
+
+  throw new Error(`Relayer transaction timed out after ${timeoutMs}ms (transactionID=${transactionId})`);
+}
+
+async function findExistingRedeemTransaction(
+  client: RelayClient,
+  metadata: string,
+): Promise<RelayerTransaction | null> {
+  const txns = await client.getTransactions();
+  const related = (Array.isArray(txns) ? txns : []).filter((txn) => String(txn?.metadata || "") === metadata);
+  return pickLatestTransaction(related);
+}
+
 async function pickWorkingRpcUrl(rpcUrls: string[], chainId: number, logPrefix: string): Promise<string> {
   const tried: Array<{ url: string; error: string }> = [];
 
@@ -189,9 +292,41 @@ async function executeRedeem(
   conditionId: string,
   logPrefix: string,
 ): Promise<void> {
+  const metadata = `ctf redeem ${conditionId}`;
+  try {
+    const existing = await findExistingRedeemTransaction(client, metadata);
+    if (existing) {
+      const state = String(existing.state || "");
+      if (RELAYER_SUCCESS_STATES.has(state)) {
+        log(logPrefix, "reuse existing redeemed tx", {
+          conditionId,
+          transactionID: existing.transactionID,
+          state,
+          txHash: existing.transactionHash,
+        });
+        return;
+      }
+      if (!RELAYER_FAILED_STATES.has(state)) {
+        log(logPrefix, "reuse existing pending tx", {
+          conditionId,
+          transactionID: existing.transactionID,
+          state,
+          txHash: existing.transactionHash,
+        });
+        await waitForTransactionState(client, existing.transactionID, conditionId, logPrefix);
+        return;
+      }
+    }
+  } catch (err) {
+    log(logPrefix, "existing transaction lookup failed", {
+      conditionId,
+      error: getErrorMessage(err),
+    });
+  }
+
   let response;
   try {
-    response = await client.execute([tx], `ctf redeem ${conditionId}`);
+    response = await client.execute([tx], metadata);
   } catch (err) {
     const message = getErrorMessage(err);
     if (txType === RelayerTxType.SAFE && /safe not deployed/i.test(message)) {
@@ -206,7 +341,7 @@ async function executeRedeem(
         txHash: deployResult.transactionHash,
         safe: deployResult.proxyAddress,
       });
-      response = await client.execute([tx], `ctf redeem ${conditionId}`);
+      response = await client.execute([tx], metadata);
     } else {
       throw err;
     }
@@ -219,10 +354,7 @@ async function executeRedeem(
     txHash: response.transactionHash,
   });
 
-  const result = await response.wait();
-  if (!result) {
-    throw new Error("Relayer transaction failed or timed out");
-  }
+  const result = await waitForTransactionState(client, response.transactionID, conditionId, logPrefix);
 
   log(logPrefix, "redeemed", {
     conditionId,
@@ -295,6 +427,8 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     forceLive: Boolean(options?.forceLive),
     relayerHost: cfg.relayerHost,
     relayerTxType: cfg.relayerTxType,
+    waitTimeoutMs: CLAIM_WAIT_TIMEOUT_MS,
+    waitPollMs: CLAIM_WAIT_POLL_MS,
   });
 
   if (effectiveDryRun) {

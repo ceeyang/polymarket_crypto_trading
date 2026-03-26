@@ -20,6 +20,10 @@ const AUTO_CLAIM_MAX_RUNTIME_MS = Math.max(
   60_000,
   Math.floor(Number(process.env.AUTO_CLAIM_MAX_RUNTIME_MS || 10 * 60_000)),
 );
+const LIVE_SYNC_MAX_CHECKS = Math.max(
+  10,
+  Math.floor(Number(process.env.LIVE_SYNC_MAX_CHECKS || 80)),
+);
 const LOG_RETENTION_MS = 24 * 60 * 60 * 1000;
 const LOG_PRUNE_INTERVAL_MS = 5 * 60 * 1000;
 let lastLogPruneAtMs = 0;
@@ -594,7 +598,8 @@ async function cancelOrderBestEffort(
 async function syncLiveOrdersAndCancelStale(
   state: StateStore,
   trader: PolymarketTrader,
-): Promise<{ checked: number; updated: number; canceled: number; finalizedCanceled: number }> {
+  options?: { maxChecks?: number; cursor?: number },
+): Promise<{ checked: number; updated: number; canceled: number; finalizedCanceled: number; totalCandidates: number; nextCursor: number }> {
   const snapshot = state.load();
   const trades = snapshot.trades ?? [];
   const nowMs = Date.now();
@@ -604,11 +609,38 @@ async function syncLiveOrdersAndCancelStale(
   let finalizedCanceled = 0;
   let changed = false;
 
-  for (const t of trades) {
-    const mode = t.executionMode ?? (t.orderId ? "LIVE" : "DRY_RUN");
-    if (mode !== "LIVE") continue;
-    if (t.resolved) continue;
-    if (!t.orderId || !String(t.orderId).trim()) continue;
+  const candidates = trades
+    .map((t, idx) => ({ t, idx }))
+    .filter(({ t }) => {
+      const mode = t.executionMode ?? (t.orderId ? "LIVE" : "DRY_RUN");
+      if (mode !== "LIVE") return false;
+      if (t.resolved) return false;
+      if (!t.orderId || !String(t.orderId).trim()) return false;
+      return true;
+    });
+
+  const totalCandidates = candidates.length;
+  if (totalCandidates === 0) {
+    return {
+      checked: 0,
+      updated: 0,
+      canceled: 0,
+      finalizedCanceled: 0,
+      totalCandidates: 0,
+      nextCursor: 0,
+    };
+  }
+
+  const limit = Math.max(1, Math.floor(Number(options?.maxChecks ?? totalCandidates)));
+  const processCount = Math.min(limit, totalCandidates);
+  const rawCursor = Number(options?.cursor ?? 0);
+  const startCursor = Number.isFinite(rawCursor)
+    ? ((Math.floor(rawCursor) % totalCandidates) + totalCandidates) % totalCandidates
+    : 0;
+
+  for (let i = 0; i < processCount; i += 1) {
+    const candidate = candidates[(startCursor + i) % totalCandidates];
+    const t = candidate.t;
     checked += 1;
 
     const orderId = String(t.orderId);
@@ -685,7 +717,14 @@ async function syncLiveOrdersAndCancelStale(
     snapshot.trades = trades;
     state.save(snapshot);
   }
-  return { checked, updated, canceled, finalizedCanceled };
+  return {
+    checked,
+    updated,
+    canceled,
+    finalizedCanceled,
+    totalCandidates,
+    nextCursor: (startCursor + processCount) % totalCandidates,
+  };
 }
 
 function pruneExpiredCycleLocks(locks: Map<string, number>, nowMs = Date.now()): void {
@@ -797,6 +836,9 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   let autoClaimInFlight = false;
   let autoClaimRunSeq = 0;
   let lastScanEnabled: boolean | null = null;
+  let maintenanceInFlight = false;
+  let maintenanceRunSeq = 0;
+  let liveSyncCursor = 0;
 
   const reloadRuntime = async (reason: string): Promise<RuntimeContext> => {
     const cfgKey = readConfigKey();
@@ -857,80 +899,6 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       const currentRuntime = await reloadRuntime("round_begin");
       const { cfg, gamma, trader, activeTargets } = currentRuntime;
       pruneExpiredCycleLocks(targetAnalysisLocks);
-
-      if (!cfg.dryRun) {
-        const liveSync = await syncLiveOrdersAndCancelStale(state, trader);
-        if (liveSync.updated > 0 || liveSync.canceled > 0 || liveSync.finalizedCanceled > 0) {
-          log("live order sync", liveSync);
-        }
-        const official = await settleLiveTradesWithOfficial(cfg, state, 0);
-        if (official.resolved > 0) {
-          log("official settlement synced", official);
-        }
-      }
-
-      const dryRunOfficial = await settleDryRunTradesWithOfficial(cfg, state, 0);
-      if (dryRunOfficial.resolved > 0 || dryRunOfficial.reconciled > 0) {
-        log("dry-run official settlement synced", dryRunOfficial);
-      }
-
-      if (cfg.autoClaim && !cfg.dryRun && !autoClaimInFlight) {
-        const nowMs = Date.now();
-        if (nowMs - lastAutoClaimAtMs >= cfg.claimIntervalSec * 1000) {
-          const runId = ++autoClaimRunSeq;
-          autoClaimInFlight = true;
-          lastAutoClaimAtMs = nowMs;
-          const cfgForClaim = cfg;
-          const startedAtMs = Date.now();
-          log("auto claim started", {
-            runId,
-            timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
-          });
-
-          const claimPromise = claimRedeemablePositions(cfgForClaim, {
-            logPrefix: "[auto-claim]",
-            quietNoop: true,
-            maxConcurrency: 3,
-          });
-
-          // Keep the main trading loop independent from relayer latency. We bound
-          // the awaited window here so a slow or stuck redeem flow cannot stall
-          // future bot rounds or leave auto-claim permanently wedged.
-          claimPromise.catch((err) => {
-            log("auto claim late error", {
-              runId,
-              error: err instanceof Error ? err.message : err,
-            });
-          });
-
-          void Promise.race<AutoClaimRaceResult>([
-            claimPromise.then((summary) => ({ kind: "result", summary })),
-            sleep(AUTO_CLAIM_MAX_RUNTIME_MS).then(() => ({ kind: "timeout" as const })),
-          ])
-            .then((outcome) => {
-              if (outcome.kind === "timeout") {
-                log("auto claim timed out", {
-                  runId,
-                  timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
-                  elapsedMs: Date.now() - startedAtMs,
-                });
-                return;
-              }
-              const claimSummary = outcome.summary;
-              if (claimSummary.reason !== "no redeemable condition ids") {
-                log("auto claim result", claimSummary);
-              }
-            })
-            .catch((err) => {
-              log("auto claim error", err instanceof Error ? err.message : err);
-            })
-            .finally(() => {
-              if (runId === autoClaimRunSeq) {
-                autoClaimInFlight = false;
-              }
-            });
-        }
-      }
 
       const perfMode = cfg.dryRun ? "DRY_RUN" : "LIVE";
       const perfAll = state.getPerformanceSummary(perfMode);
@@ -1184,6 +1152,104 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             orderStatus: String(response?.status ?? "OPEN"),
           });
         }
+      }
+
+      if (!maintenanceInFlight) {
+        const maintenanceRunId = ++maintenanceRunSeq;
+        maintenanceInFlight = true;
+        const maintenanceCfg = cfg;
+        const maintenanceTrader = trader;
+
+        // Run housekeeping after order placement so slow sync/claim work
+        // never delays the entry window for the current cycle.
+        void (async () => {
+          try {
+            if (!maintenanceCfg.dryRun) {
+              const liveSync = await syncLiveOrdersAndCancelStale(state, maintenanceTrader, {
+                maxChecks: LIVE_SYNC_MAX_CHECKS,
+                cursor: liveSyncCursor,
+              });
+              liveSyncCursor = liveSync.nextCursor;
+              if (liveSync.updated > 0 || liveSync.canceled > 0 || liveSync.finalizedCanceled > 0 || liveSync.totalCandidates > LIVE_SYNC_MAX_CHECKS) {
+                log("live order sync", liveSync);
+              }
+
+              const official = await settleLiveTradesWithOfficial(maintenanceCfg, state, 0);
+              if (official.resolved > 0) {
+                log("official settlement synced", official);
+              }
+            }
+
+            const dryRunOfficial = await settleDryRunTradesWithOfficial(maintenanceCfg, state, 0);
+            if (dryRunOfficial.resolved > 0 || dryRunOfficial.reconciled > 0) {
+              log("dry-run official settlement synced", dryRunOfficial);
+            }
+
+            if (maintenanceCfg.autoClaim && !maintenanceCfg.dryRun && !autoClaimInFlight) {
+              const nowMs = Date.now();
+              if (nowMs - lastAutoClaimAtMs >= maintenanceCfg.claimIntervalSec * 1000) {
+                const runId = ++autoClaimRunSeq;
+                autoClaimInFlight = true;
+                lastAutoClaimAtMs = nowMs;
+                const cfgForClaim = maintenanceCfg;
+                const startedAtMs = Date.now();
+                log("auto claim started", {
+                  runId,
+                  timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
+                });
+
+                const claimPromise = claimRedeemablePositions(cfgForClaim, {
+                  logPrefix: "[auto-claim]",
+                  quietNoop: true,
+                  maxConcurrency: 3,
+                });
+
+                // Keep the main trading loop independent from relayer latency. We bound
+                // the awaited window here so a slow or stuck redeem flow cannot stall
+                // future bot rounds or leave auto-claim permanently wedged.
+                claimPromise.catch((err) => {
+                  log("auto claim late error", {
+                    runId,
+                    error: err instanceof Error ? err.message : err,
+                  });
+                });
+
+                void Promise.race<AutoClaimRaceResult>([
+                  claimPromise.then((summary) => ({ kind: "result", summary })),
+                  sleep(AUTO_CLAIM_MAX_RUNTIME_MS).then(() => ({ kind: "timeout" as const })),
+                ])
+                  .then((outcome) => {
+                    if (outcome.kind === "timeout") {
+                      log("auto claim timed out", {
+                        runId,
+                        timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
+                        elapsedMs: Date.now() - startedAtMs,
+                      });
+                      return;
+                    }
+                    const claimSummary = outcome.summary;
+                    if (claimSummary.reason !== "no redeemable condition ids") {
+                      log("auto claim result", claimSummary);
+                    }
+                  })
+                  .catch((err) => {
+                    log("auto claim error", err instanceof Error ? err.message : err);
+                  })
+                  .finally(() => {
+                    if (runId === autoClaimRunSeq) {
+                      autoClaimInFlight = false;
+                    }
+                  });
+              }
+            }
+          } catch (maintenanceErr) {
+            log("background maintenance error", maintenanceErr instanceof Error ? maintenanceErr.message : maintenanceErr);
+          } finally {
+            if (maintenanceRunId === maintenanceRunSeq) {
+              maintenanceInFlight = false;
+            }
+          }
+        })();
       }
     } catch (err) {
       log("main loop error", err instanceof Error ? err.message : err);
