@@ -77,7 +77,9 @@ function formatDate(date: Date): string {
 function log(msg: string, obj?: unknown, tag = "system", level = "info") {
   const tsISO = new Date().toISOString();
   const tsDisplay = formatDate(new Date());
-  const taggedMsg = `[${tag}] [${level}] ${msg}`;
+  const tagPart = `[${tag}]`.padEnd(16);
+  const levelPart = `[${level}]`.padEnd(10);
+  const taggedMsg = `${tagPart} ${levelPart} ${msg}`;
 
   if (LOG_TO_STDOUT) {
     if (obj == null) {

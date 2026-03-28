@@ -373,11 +373,16 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   const quietNoop = Boolean(options?.quietNoop);
   const maxConcurrency = Math.max(1, Math.floor(Number(options?.maxConcurrency ?? 1)));
   const effectiveDryRun = cfg.dryRun && !Boolean(options?.forceLive);
-  if (!cfg.privateKey) {
+
+  const rawPrivateKey = cfg.privateKey || process.env.PRIVATE_KEY;
+  if (!rawPrivateKey) {
+    if (effectiveDryRun) {
+      return { user: "dummy", redeemablePositions: 0, conditions: 0, success: 0, failed: 0, dryRun: true, reason: "dry-run" };
+    }
     throw new Error("PRIVATE_KEY missing in .env");
   }
 
-  const privateKey = normalizePrivateKey(cfg.privateKey);
+  const privateKey = normalizePrivateKey(rawPrivateKey);
   const signer = new Wallet(privateKey);
   const user = cfg.funderAddress && cfg.funderAddress.trim() ? cfg.funderAddress.trim() : signer.address;
 
@@ -402,12 +407,13 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     const isRedeemable = Boolean(p?.redeemable);
     const size = Number(p?.size ?? p?.amount ?? 0);
     const usd = extractClaimableUsd(p);
-    
+    claimLog("position", p);
+
     if (isRedeemable && size > 0 && usd > 0) return true;
-    
+
     // 增加详细诊断日志，仅在有 redeemable 标记但过滤失败时
     if (isRedeemable && (size <= 0 || usd <= 0)) {
-      claimLog("position skipped", { 
+      claimLog("position skipped", {
         conditionId: p?.conditionId || p?.condition_id,
         size,
         usd,

@@ -440,7 +440,9 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
 function webLog(msg: string, obj?: unknown, tag = "web-claim", level = "info") {
   const tsISO = new Date().toISOString();
   const tsDisplay = formatDate(new Date());
-  const taggedMsg = `[${tag}] [${level}] ${msg}`;
+  const tagPart = `[${tag}]`.padEnd(16);
+  const levelPart = `[${level}]`.padEnd(10);
+  const taggedMsg = `${tagPart} ${levelPart} ${msg}`;
   const line = JSON.stringify({ ts: tsISO, msg: `${tsDisplay} ${taggedMsg}`, data: obj }) + "\n";
   try {
     fs.appendFileSync(LOG_FILE, line, "utf8");
@@ -579,17 +581,17 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (method === "GET" && pathname === "/api/logs") {
-        const tail = Number(parsedUrl.searchParams.get("tail") || "200");
-        const rawLines = tailLines(LOG_FILE, Number.isFinite(tail) ? tail : 200);
-        const lines = rawLines.map((line) => {
+        const tailLines = Math.max(10, Math.min(2000, Number(parsedUrl.searchParams.get("tail") || 100)));
+        const lines = fs.readFileSync(LOG_FILE, "utf8").trim().split("\n").filter(Boolean).slice(-tailLines);
+        const msgs = lines.map(l => {
           try {
-            const parsed = JSON.parse(line);
-            return parsed.msg || line;
-          } catch {
-            return line;
-          }
+            const raw = JSON.parse(l);
+            const msg = raw.msg || l;
+            const extra = raw.data && Object.keys(raw.data).length > 0 ? " " + JSON.stringify(raw.data) : "";
+            return msg + extra;
+          } catch { return l; }
         });
-        sendJson(res, 200, { lines });
+        sendJson(res, 200, { lines: msgs });
         return;
       }
 
