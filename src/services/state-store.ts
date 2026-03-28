@@ -64,8 +64,30 @@ export class StateStore {
     state.tradedMarkets[trade.marketId] = isoNow();
     state.lastTradeAt = isoNow();
     state.trades = state.trades ?? [];
+    
+    // 检查重复记录
+    if (trade.orderId) {
+      const exists = state.trades.some(t => t.orderId === trade.orderId);
+      if (exists) return;
+    }
+
     state.trades.push(trade);
     this.save(state);
+  }
+
+  updateTradeStatus(orderId: string, updates: Partial<LiveTradeRecord>): void {
+    const state = this.load();
+    const trades = state.trades ?? [];
+    let changed = false;
+    for (const t of trades) {
+      if (t.orderId === orderId) {
+        Object.assign(t, updates);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.save(state);
+    }
   }
 
   recordPrediction(prediction: PredictionAuditRecord, maxItems = 300): void {
@@ -141,6 +163,8 @@ export class StateStore {
     settledTrades: number;
     wins: number;
     winRate: number;
+    avgFillRate: number;
+    totalPnLUsd: number;
   } {
     const state = this.load();
     const trades = (state.trades ?? []).filter((x) => this.matchesMode(x, mode));
@@ -152,6 +176,8 @@ export class StateStore {
     settledTrades: number;
     wins: number;
     winRate: number;
+    avgFillRate: number;
+    totalPnLUsd: number;
   } {
     const startMs = Date.parse(startTime);
     const state = this.load();
@@ -219,15 +245,84 @@ export class StateStore {
     settledTrades: number;
     wins: number;
     winRate: number;
+    avgFillRate: number;
+    totalPnLUsd: number;
   } {
     const settled = trades.filter((x) => x.resolved && !isCancelledTrade(x));
     const wins = settled.filter((x) => x.win).length;
+    
+    let totalPlannedSize = 0;
+    let totalFilledSize = 0;
+    let totalPnL = 0;
+
+    for (const t of trades) {
+      totalPlannedSize += (t.orderPlanShareSize || 0);
+      totalFilledSize += (t.matchedSize || 0);
+      if (t.resolved && t.officialPnlUsd != null) {
+        totalPnL += t.officialPnlUsd;
+      }
+    }
+
     return {
       totalTrades: trades.length,
       settledTrades: settled.length,
       wins,
       winRate: settled.length > 0 ? wins / settled.length : 0,
+      avgFillRate: totalPlannedSize > 0 ? totalFilledSize / totalPlannedSize : 0,
+      totalPnLUsd: totalPnL,
     };
+  }
+
+  getMarketGroupedSummary(): Array<{
+    marketId: string;
+    title: string;
+    entryTime: string;
+    yes: Partial<LiveTradeRecord>;
+    no: Partial<LiveTradeRecord>;
+    isFullPair: boolean;
+    pairPnL: number;
+    totalFilled: number;
+  }> {
+    const state = this.load();
+    const trades = state.trades ?? [];
+    const groups = new Map<string, any>();
+
+    for (const t of trades) {
+      if (!groups.has(t.marketId)) {
+        groups.set(t.marketId, {
+          marketId: t.marketId,
+          title: t.marketTitle || "Unknown",
+          entryTime: t.entryTime,
+          yes: {},
+          no: {},
+        });
+      }
+      const g = groups.get(t.marketId);
+      if (t.side === "YES") g.yes = t;
+      else g.no = t;
+    }
+
+    return Array.from(groups.values()).map(g => {
+      const yesFilled = g.yes.matchedSize || 0;
+      const noFilled = g.no.matchedSize || 0;
+      const isFullPair = yesFilled > 0 && noFilled > 0;
+      
+      let pairPnL = 0;
+      // 简易 PnL：获胜边收益 1.0 - 双边成本
+      if (g.yes.resolved && g.no.resolved) {
+        const winningSide = g.yes.win ? "YES" : "NO";
+        const totalCost = (yesFilled * (g.yes.entryPrice || 0)) + (noFilled * (g.no.entryPrice || 0));
+        const totalReturn = winningSide === "YES" ? yesFilled : noFilled;
+        pairPnL = totalReturn - totalCost;
+      }
+
+      return {
+        ...g,
+        isFullPair,
+        pairPnL,
+        totalFilled: yesFilled + noFilled,
+      };
+    }).sort((a,b) => Date.parse(b.entryTime) - Date.parse(a.entryTime));
   }
 
   private normalizeMode(trade: LiveTradeRecord): "LIVE" | "DRY_RUN" {

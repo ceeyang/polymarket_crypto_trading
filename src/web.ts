@@ -209,24 +209,59 @@ function isCancelledTrade(t: LiveTradeRecord): boolean {
 }
 
 function summarizeTrades(trades: LiveTradeRecord[]): {
-  totalTrades: number;
-  settledTrades: number;
-  pendingTrades: number;
+  total: number;
+  settled: number;
   wins: number;
-  losses: number;
-  winRate: number;
+  winRate: number; // 这在对冲策略里代表双边匹配率
+  avgFillRate: number;
+  totalPnL: number;
 } {
-  const settled = trades.filter((x) => x.resolved && !isCancelledTrade(x));
-  const wins = settled.filter((x) => x.win).length;
-  const losses = settled.length - wins;
-  const pending = trades.filter((x) => !x.resolved && !isCancelledTrade(x)).length;
+  const settled = trades.filter((t) => t.resolved && !isCancelledTrade(t));
+  const wins = settled.filter((t) => t.win).length;
+  
+  let totalPlannedSize = 0;
+  let totalFilledSize = 0;
+  let totalPnL = 0;
+
+  const marketMap = new Map<string, { yes: number, no: number }>();
+
+  for (const t of trades) {
+    totalPlannedSize += (t.orderPlanShareSize || 0);
+    totalFilledSize += (t.matchedSize || 0);
+    
+    // 按市场分组统计双边成交
+    if (!marketMap.has(t.marketId)) {
+      marketMap.set(t.marketId, { yes: 0, no: 0 });
+    }
+    const side = String(t.side).toUpperCase();
+    const m = marketMap.get(t.marketId)!;
+    const filled = t.matchedSize || 0;
+    if (side === "YES") m.yes += filled;
+    else m.no += filled;
+
+    if (t.resolved) {
+      const matched = t.matchedSize || 0;
+      const price = t.entryPrice || 0;
+      if (t.win) {
+        totalPnL += (matched * (1.0 - price));
+      } else {
+        totalPnL -= (matched * price);
+      }
+    }
+  }
+
+  // 计算双边对冲匹配率
+  const marketIds = Array.from(marketMap.keys());
+  const fullPairCount = Array.from(marketMap.values()).filter(v => v.yes > 0 && v.no > 0).length;
+  const pairMatchRate = marketIds.length > 0 ? fullPairCount / marketIds.length : 0;
+
   return {
-    totalTrades: trades.length,
-    settledTrades: settled.length,
-    pendingTrades: pending,
+    total: trades.length,
+    settled: settled.length,
     wins,
-    losses,
-    winRate: settled.length > 0 ? wins / settled.length : 0,
+    winRate: pairMatchRate, // 这里的 WinRate 在前端被显示为双边成交率
+    avgFillRate: totalPlannedSize > 0 ? totalFilledSize / totalPlannedSize : 0,
+    totalPnL,
   };
 }
 
@@ -619,6 +654,12 @@ const server = http.createServer(async (req, res) => {
         accountCache = null;
         const account = await fetchAccountSummaryCached(0);
         sendJson(res, 200, { ok: true, claim, account });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/api/trades/grouped") {
+        const items = stateStore.getMarketGroupedSummary();
+        sendJson(res, 200, { items });
         return;
       }
 

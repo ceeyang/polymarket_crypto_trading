@@ -867,6 +867,37 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   let cancelStaleInFlight = false;
   let lastScanEnabled: boolean | null = null;
   let liveSyncCursor = 0;
+  let reconcileInFlightCount = 0;
+
+  async function reconcileOrder(trader: PolymarketTrader, orderId: string, label: string) {
+    if (reconcileInFlightCount > 5) return; // 限制并发
+    try {
+      reconcileInFlightCount++;
+      // 随机延迟防封
+      await sleep(500 + Math.random() * 2000);
+      
+      const res = await trader.getOrder(orderId);
+      if (!res) return;
+
+      const sizeMatched = Number(res.size_matched || res.matched_size || 0);
+      const status = String(res.status || "UNKNOWN");
+      const avgPrice = Number(res.average_filled_price || res.avg_price || 0);
+      
+      state.updateTradeStatus(orderId, {
+        matchedSize: sizeMatched,
+        orderStatus: status,
+        entryPrice: avgPrice > 0 ? avgPrice : undefined,
+      });
+
+      if (status === "FILLED" || sizeMatched > 0) {
+        logInfo(`[${label}] reconciled order status`, { orderId, status, sizeMatched }, "reconcile");
+      }
+    } catch (err) {
+      // ignore
+    } finally {
+      reconcileInFlightCount--;
+    }
+  }
 
   const reloadRuntime = async (reason: string): Promise<RuntimeContext> => {
     const cfgKey = readConfigKey();
@@ -940,11 +971,27 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         sessionSettledTrades: perfSession.settledTrades,
         sessionWins: perfSession.wins,
         sessionWinRate: Number((perfSession.winRate * 100).toFixed(2)),
+        avgFillRate: Number((perfAll.avgFillRate * 100).toFixed(2)),
+        totalPnLUsd: Number(perfAll.totalPnLUsd.toFixed(4)),
       };
       const summaryKey = JSON.stringify(summaryPayload);
       if (summaryKey !== lastSummaryKey) {
         logInfo("round summary", summaryPayload, "search-market");
         lastSummaryKey = summaryKey;
+      }
+
+      // ── 异步订单对账（独立，非阻塞）──────────────────────────────────────
+      if (trader && !cfg.dryRun) {
+        const unresolvedTrades = (state.load().trades || [])
+          .filter(t => t.executionMode === "LIVE" && t.orderId && !t.resolved)
+          .filter(t => !["FILLED", "CANCELED", "EXPIRED"].includes(String(t.orderStatus).toUpperCase()))
+          .slice(-30); // 仅追溯最近 30 笔进行对账
+
+        for (const t of unresolvedTrades) {
+          if (t.orderId && reconcileInFlightCount < 3) {
+            void reconcileOrder(trader, t.orderId, targetLabel({ coin: (t.coin as any), horizonMin: (t.horizonMin as any) } as any));
+          }
+        }
       }
 
       // ── 异步撤销过期/已结算挂单（独立 inFlight，不阻塞主循环）─────────────────

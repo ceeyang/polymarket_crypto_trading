@@ -419,7 +419,7 @@
 
     .trade-summary {
       display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 10px;
     }
 
@@ -896,12 +896,10 @@
         </div>
 
         <div class="trade-summary">
-          <div class="trade-stat"><span class="muted">总交易</span><strong id="sTotal">0</strong></div>
-          <div class="trade-stat"><span class="muted">已结算</span><strong id="sSettled">0</strong></div>
-          <div class="trade-stat"><span class="muted">未结算</span><strong id="sPending">0</strong></div>
-          <div class="trade-stat"><span class="muted">胜</span><strong id="sWins">0</strong></div>
-          <div class="trade-stat"><span class="muted">负</span><strong id="sLosses">0</strong></div>
-          <div class="trade-stat"><span class="muted">胜率</span><strong id="sWinRate">0%</strong></div>
+          <div class="trade-stat"><span class="muted">总挂单记录</span><strong id="sTotal">0</strong></div>
+          <div class="trade-stat"><span class="muted">双边成交率 (挂上即胜)</span><strong id="sWinRate">0.00%</strong></div>
+          <div class="trade-stat"><span class="muted">单边平均成交深度</span><strong id="sFillRate">0.00%</strong></div>
+          <div class="trade-stat"><span class="muted">账户累计总盈亏</span><strong id="sPnL">$0.0000</strong></div>
         </div>
 
         <div class="section trade-table-card">
@@ -1327,12 +1325,11 @@
     }
 
     function renderTradeSummary(summary) {
-      document.getElementById("sTotal").textContent = String(summary?.totalTrades ?? 0);
-      document.getElementById("sSettled").textContent = String(summary?.settledTrades ?? 0);
-      document.getElementById("sPending").textContent = String(summary?.pendingTrades ?? 0);
-      document.getElementById("sWins").textContent = String(summary?.wins ?? 0);
-      document.getElementById("sLosses").textContent = String(summary?.losses ?? 0);
+      document.getElementById("sTotal").textContent = String(summary?.total ?? 0);
       document.getElementById("sWinRate").textContent = fmtPct(summary?.winRate ?? 0);
+      document.getElementById("sFillRate").textContent = fmtPct(summary?.avgFillRate ?? 0);
+      document.getElementById("sPnL").textContent = (summary?.totalPnL >= 0 ? "+" : "") + 
+        fmtNumber(summary?.totalPnL, 4) + " USDC";
     }
 
     function renderTrades(items) {
