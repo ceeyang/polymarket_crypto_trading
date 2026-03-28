@@ -769,7 +769,6 @@
     <div class="tabs">
       <button class="tab-btn active" data-tab="runtime">运行配置</button>
       <button class="tab-btn" data-tab="trades">交易记录</button>
-      <button class="tab-btn" data-tab="predictions">周期执行</button>
       <button class="tab-btn" data-tab="logs">运行日志</button>
     </div>
 
@@ -793,7 +792,7 @@
             <label class="toggle"><input id="autoClaim" type="checkbox" />自动领取收益</label>
             <div class="field"><label for="pollIntervalSec">轮询间隔(秒)</label><input id="pollIntervalSec" type="number"
                 min="5" step="1" /></div>
-            <div class="field"><label for="claimIntervalSec">收益提取间隔(秒)</label><input id="claimIntervalSec" type="number"
+            <div class="field"><label for="claimIntervalSec">收益提取间隔(秒) <span id="claimCountdown" style="color:var(--primary);margin-left:8px;font-weight:600;font-size:11px;"></span></label><input id="claimIntervalSec" type="number"
                 min="60" step="10" /></div>
           </div>
         </div>
@@ -919,42 +918,6 @@
       </div>
     </section>
 
-    <section class="card panel" data-panel="predictions">
-      <div class="toolbar">
-        <div>
-          <h2>最近周期执行</h2>
-          <div class="muted" id="predictionStatus">尚未加载</div>
-        </div>
-        <div class="table-actions">
-          <select id="predictionLimit">
-            <option value="25">最近 25 条</option>
-            <option value="50">最近 50 条</option>
-            <option value="100">最近 100 条</option>
-          </select>
-          <button class="secondary" id="refreshPredictionsBtn">刷新</button>
-          <button class="danger" id="clearPredictionsBtn">清空</button>
-        </div>
-      </div>
-
-      <div style="overflow:auto; margin-top: 12px;">
-        <table>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>目标</th>
-              <th>市场</th>
-              <th>挂单梯子</th>
-              <th>订单数</th>
-              <th>单边金额</th>
-              <th>双边金额</th>
-              <th>动作</th>
-              <th>说明</th>
-            </tr>
-          </thead>
-          <tbody id="predictionsBody"></tbody>
-        </table>
-      </div>
-    </section>
 
     <section class="card panel" data-panel="logs">
       <div class="toolbar">
@@ -975,6 +938,7 @@
 
   <script>
     let fullConfig = null;
+    let globalLastClaimAtMs = 0;
     let activeTab = "runtime";
     const tradeQuery = { page: 1, pageSize: 20, targetId: "", resolved: "" };
     const DEFAULT_ORDER_ENTRIES = [
@@ -1440,40 +1404,7 @@
       wrapper.appendChild(winSection);
     }
 
-    function renderPredictions(items) {
-      predictionsBody.innerHTML = "";
-      if (!Array.isArray(items) || !items.length) {
-        predictionsBody.innerHTML = '<tr><td colspan="9" class="muted">暂无周期执行记录</td></tr>';
-        return;
-      }
-      for (const item of items) {
-        const tr = document.createElement("tr");
-        const strategy = item?.strategyMeta || {};
-        const entries = Array.isArray(strategy?.orderEntries) && strategy.orderEntries.length
-          ? strategy.orderEntries
-          : ((strategy?.orderPrice && strategy?.orderShareSize)
-            ? [{ price: strategy.orderPrice, shareSize: strategy.orderShareSize, plannedNotionalUsd: (strategy.orderPrice * strategy.orderShareSize) }]
-            : []);
-        const perSideUsd = strategy?.plannedNotionalPerSideUsd;
-        const totalUsd = strategy?.plannedTotalNotionalUsd;
-        const orderCount = strategy?.plannedOrderCount ?? (entries.length * 2);
-        const ladderText = entries.length
-          ? entries.map((entry) => `${fmtNumber(entry?.price, 4)} x ${fmtNumber(entry?.shareSize, 0)}`).join(" / ")
-          : "-";
-        tr.innerHTML = `
-            <td>${fmtTime(item?.createdAt)}</td>
-            <td>${escapeHtml(item?.targetId || "-")}</td>
-            <td>${escapeHtml(item?.marketTitle || item?.marketId || "-")}</td>
-            <td>${escapeHtml(ladderText)}</td>
-            <td>${fmtNumber(orderCount, 0)}</td>
-            <td>${fmtNumber(perSideUsd, 4)}</td>
-            <td>${fmtNumber(totalUsd, 4)}</td>
-            <td>${escapeHtml(item?.decisionAction || "-")} / ${escapeHtml(item?.decisionReason || "")}</td>
-            <td>${escapeHtml(item?.marketId || "-")}</td>
-          `;
-        predictionsBody.appendChild(tr);
-      }
-    }
+
 
     function fillForm(cfg) {
       setValue("pollIntervalSec", cfg.runtime.pollIntervalSec);
@@ -1580,32 +1511,6 @@
       }
     }
 
-    async function loadPredictions() {
-      try {
-        const limit = Number(predictionLimit.value || "50");
-        const resp = await apiFetch(`/api/predictions?limit=${encodeURIComponent(limit)}`);
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-        renderPredictions(data.items || []);
-        predictionStatus.textContent = `更新于 ${new Date().toLocaleTimeString()}`;
-      } catch (err) {
-        predictionStatus.textContent = `读取失败: ${String(err)}`;
-      }
-    }
-
-    async function clearPredictions() {
-      const ok = window.confirm("确认清空周期执行记录？");
-      if (!ok) return;
-      try {
-        predictionStatus.textContent = "清空中...";
-        const resp = await apiFetch("/api/predictions/clear", { method: "POST" });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-        await loadPredictions();
-      } catch (err) {
-        predictionStatus.textContent = `清空失败: ${String(err)}`;
-      }
-    }
 
     function formatAccountText(data) {
       const equity = Number(data?.totalEquityUsd ?? 0);
@@ -1692,6 +1597,7 @@
     function updateScanControl(view) {
       const effectiveScanning = Boolean(view?.effectiveScanning);
       scanDot.classList.toggle("on", effectiveScanning);
+      globalLastClaimAtMs = view?.lastClaimAtMs || 0;
       scanTitle.innerHTML = `<strong>${effectiveScanning ? "扫描中" : "已暂停"}</strong>`;
       scanMeta.textContent = `${view?.mode || "-"} | switchEnabled=${view?.switchEnabled ? "yes" : "no"} | updatedBy=${view?.updatedBy || "-"} | ${fmtTime(view?.updatedAt)}`;
       scanToggleBtn.disabled = !view?.switchEnabled;
@@ -1748,15 +1654,12 @@
       await loadConfig();
       tradeQuery.page = 1;
       await loadTrades();
-      await loadPredictions();
     });
     document.getElementById("saveBtn").addEventListener("click", saveConfig);
     document.getElementById("refreshBalanceBtn").addEventListener("click", loadAccount);
     document.getElementById("claimBalanceBtn").addEventListener("click", claimRewards);
     document.getElementById("refreshTradesBtn").addEventListener("click", loadTrades);
     document.getElementById("clearTradesBtn").addEventListener("click", clearTrades);
-    document.getElementById("refreshPredictionsBtn").addEventListener("click", loadPredictions);
-    document.getElementById("clearPredictionsBtn").addEventListener("click", clearPredictions);
     document.getElementById("refreshLogBtn").addEventListener("click", loadLogs);
     document.getElementById("clearLogBtn").addEventListener("click", clearLogs);
     document.getElementById("logSearch").addEventListener("input", loadLogs);
@@ -1810,7 +1713,6 @@
       tradeQuery.page += 1;
       await loadTrades();
     });
-    predictionLimit.addEventListener("change", loadPredictions);
 
     document.querySelectorAll(".tab-btn").forEach((btn) => {
       btn.addEventListener("click", () => setActiveTab(btn.getAttribute("data-tab") || "runtime"));
@@ -1822,15 +1724,40 @@
       await loadVersion();
       await loadConfig();
       await loadTrades();
-      await loadPredictions();
       await loadAccount();
       await loadBotControl();
       await loadLogs();
       setInterval(loadTrades, 5000);
-      setInterval(loadPredictions, 6000);
       setInterval(loadAccount, 10000);
       setInterval(loadBotControl, 4000);
       setInterval(loadLogs, 3000);
+
+      setInterval(() => {
+        const span = document.getElementById("claimCountdown");
+        if (!span) return;
+        const autoClaim = document.getElementById("autoClaim")?.checked;
+        if (!autoClaim) {
+           span.textContent = "";
+           return;
+        }
+        const intervalSec = Number(document.getElementById("claimIntervalSec")?.value || 1800);
+        if (globalLastClaimAtMs === 0) {
+           span.textContent = "(等待执行...)";
+           return;
+        }
+        const intervalMs = intervalSec * 1000;
+        const nowMs = Date.now();
+        const nextClaimAtMs = globalLastClaimAtMs + intervalMs;
+        if (nowMs >= nextClaimAtMs) {
+          span.textContent = "(列队提取中...)";
+        } else {
+          const diffSec = Math.floor((nextClaimAtMs - nowMs) / 1000);
+          const h = Math.floor(diffSec / 3600);
+          const m = String(Math.floor((diffSec % 3600) / 60)).padStart(2, "0");
+          const s = String(diffSec % 60).padStart(2, "0");
+          span.textContent = h > 0 ? `(倒计时: ${h}小时${m}分${s}秒)` : `(倒计时: ${m}分${s}秒)`;
+        }
+      }, 1000);
     })();
   </script>
 </body>

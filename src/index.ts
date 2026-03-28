@@ -894,13 +894,17 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       const status = String(res.status || "UNKNOWN");
       const avgPrice = Number(res.average_filled_price || res.avg_price || 0);
 
+      const prevTrade = state.load().trades?.find((t) => t.orderId === orderId);
+      const prevStatus = prevTrade?.orderStatus || "";
+      const prevMatched = prevTrade?.matchedSize || 0;
+
       state.updateTradeStatus(orderId, {
         matchedSize: sizeMatched,
         orderStatus: status,
         entryPrice: avgPrice > 0 ? avgPrice : undefined,
       });
 
-      if (status === "FILLED" || sizeMatched > 0) {
+      if ((status !== prevStatus || sizeMatched > prevMatched) && (status === "FILLED" || status === "MATCHED" || sizeMatched > 0)) {
         logInfo(`[${label}] reconciled order status`, { orderId, status, sizeMatched }, "reconcile");
       }
     } catch (err) {
@@ -995,7 +999,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       if (trader && !cfg.dryRun) {
         const unresolvedTrades = (state.load().trades || [])
           .filter(t => t.executionMode === "LIVE" && t.orderId && !t.resolved)
-          .filter(t => !["FILLED", "CANCELED", "EXPIRED"].includes(String(t.orderStatus).toUpperCase()))
+          .filter(t => !["FILLED", "MATCHED", "CLOSED", "CANCELED", "EXPIRED", "REJECTED"].includes(String(t.orderStatus).toUpperCase()))
           .slice(-30); // 仅追溯最近 30 笔进行对账
 
         for (const t of unresolvedTrades) {
@@ -1234,7 +1238,6 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
 
       const readyEvaluations = evaluations.filter((x): x is PreparedEvaluation => Boolean(x));
       for (const evaluation of readyEvaluations) {
-        state.recordPrediction(evaluation.audit);
         targetAnalysisLocks.set(evaluation.audit.targetId, evaluation.cycleLockUntilMs);
       }
 

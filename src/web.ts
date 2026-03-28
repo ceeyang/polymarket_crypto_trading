@@ -567,7 +567,14 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
       }
 
       if (method === "GET" && pathname === "/api/bot/control") {
-        sendJson(res, 200, getBotControlView());
+        const view = getBotControlView() as any;
+        try {
+          const content = fs.readFileSync(path.resolve("state", "last_claim.txt"), "utf8");
+          view.lastClaimAtMs = parseInt(content.trim(), 10) || 0;
+        } catch {
+          view.lastClaimAtMs = 0;
+        }
+        sendJson(res, 200, view);
         return;
       }
 
@@ -844,18 +851,7 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         return;
       }
 
-      if (method === "GET" && pathname === "/api/predictions") {
-        const limit = Math.min(200, parsePositiveInt(parsedUrl.searchParams.get("limit"), 50));
-        const items = stateStore.listPredictions(limit);
-        sendJson(res, 200, { items });
-        return;
-      }
 
-      if ((method === "POST" || method === "DELETE") && pathname === "/api/predictions/clear") {
-        stateStore.clearPredictions();
-        sendJson(res, 200, { ok: true });
-        return;
-      }
 
       sendJson(res, 404, { error: "not found" });
     } catch (err) {
