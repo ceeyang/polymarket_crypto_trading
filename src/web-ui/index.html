@@ -1312,14 +1312,17 @@
         
         let rowsHtml = "";
         for (const tier of tg.tiers) {
-           const fillRate = tier.planned > 0 ? (tier.matched / tier.planned * 100).toFixed(2) : "0.00";
+           const fillRate = tier.markets > 0 ? (tier.doubleFills / tier.markets * 100).toFixed(2) : "0.00";
+           const tierYieldPct = tier.cost > 0 ? (tier.pnl / tier.cost * 100).toFixed(2) : "0.00";
            const pnlColor = tier.pnl >= 0 ? 'var(--success)' : 'var(--danger)';
            rowsHtml += `
-              <tr>
-                <td style="font-weight:600; padding:10px;">$${tier.price}</td>
-                <td style="padding:10px;">${fmtNumber(tier.matched, 1)} / ${fmtNumber(tier.planned, 0)}</td>
-                <td style="padding:10px;">${fillRate}%</td>
-                <td style="padding:10px; color:${pnlColor}; font-weight:600;">${tier.pnl >= 0 ? '+' : ''}${fmtNumber(tier.pnl, 2)}</td>
+              <tr style="border-bottom: 1px solid rgba(0,0,0,0.03);">
+                <td style="font-weight:600; padding:10px 18px;">$${tier.price}</td>
+                <td style="padding:10px;">${fmtNumber(tier.winShares || 0, 1)}</td>
+                <td style="padding:10px;">${fillRate}% <span style="color:var(--muted); font-size:11px; margin-left:4px;">(${tier.doubleFills || 0}/${tier.markets || 0})</span></td>
+                <td style="padding:10px;">$${fmtNumber(tier.cost || 0, 4)}</td>
+                <td style="padding:10px; color:${pnlColor}; font-weight:600;">${tier.pnl >= 0 ? '+' : ''}${tierYieldPct}%</td>
+                <td style="padding:10px; color:${pnlColor}; font-weight:600;">${tier.pnl >= 0 ? '+' : ''}${fmtNumber(tier.pnl || 0, 4)}</td>
               </tr>
            `;
         }
@@ -1355,10 +1358,12 @@
           <table style="width:100%; text-align:left; font-size:13px; border-collapse:collapse;">
              <thead>
                <tr style="border-bottom: 2px solid var(--border);">
-                 <th style="padding:8px 18px; color:var(--muted)">单前水位</th>
-                 <th style="padding:8px 10px; color:var(--muted)">实吃股数/计划</th>
-                 <th style="padding:8px 10px; color:var(--muted)">打针成交率</th>
-                 <th style="padding:8px 10px; color:var(--muted)">层级净盈亏</th>
+                 <th style="padding:8px 18px; color:var(--muted)">单价</th>
+                 <th style="padding:8px 10px; color:var(--muted)">成交份数</th>
+                 <th style="padding:8px 10px; color:var(--muted)">成交率</th>
+                 <th style="padding:8px 10px; color:var(--muted)">总成本</th>
+                 <th style="padding:8px 10px; color:var(--muted)">收益率</th>
+                 <th style="padding:8px 10px; color:var(--muted)">收益金额</th>
                </tr>
              </thead>
              <tbody>

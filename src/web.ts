@@ -797,7 +797,7 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
           const priceKey = toNumber(t.orderPlanPrice).toFixed(3);
           let tier = tg.tiers.get(priceKey);
           if (!tier) {
-             tier = { price: Number(priceKey), planned: 0, matched: 0, cost: 0, pnl: 0 };
+             tier = { price: Number(priceKey), planned: 0, matched: 0, cost: 0, pnl: 0, winShares: 0, doubleFills: 0, markets: 0 };
              tg.tiers.set(priceKey, tier);
           }
           tier.planned += toNumber(t.orderPlanShareSize);
@@ -861,6 +861,23 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
            if (tg) {
                tg.totalCost += m.totalNotional;
                tg.totalPnl += marketPnl;
+
+               const priceKey = m.trades.length > 0 ? toNumber(m.trades[0].orderPlanPrice).toFixed(3) : "0.010";
+               let tier = tg.tiers.get(priceKey);
+               if (!tier) {
+                   tier = { price: Number(priceKey), planned: 0, matched: 0, cost: 0, pnl: 0, winShares: 0, doubleFills: 0, markets: 0 };
+                   tg.tiers.set(priceKey, tier);
+               }
+               tier.markets += 1;
+               if (m.isDoubleFill) tier.doubleFills += 1;
+
+               if (m.resolved) {
+                   tier.winShares += resolvedWinMatched;
+               } else if (m.isDoubleFill) {
+                   const minShares = Math.min(yesMatched, noMatched);
+                   tier.winShares += minShares;
+                   tier.pnl += m.expectedPnl;
+               }
            }
 
            if (m.isDoubleFill) sumDoubleFills++;
