@@ -148,7 +148,8 @@ function parseOutcomeWin(side: "YES" | "NO", raw: string): boolean | null {
 function isCancelledOrderStatus(raw: unknown): boolean {
   const s = String(raw || "").trim().toUpperCase();
   if (!s) return false;
-  return s.includes("CANCEL") || s === "EXPIRED" || s === "REJECTED";
+  // FILLED 和 MATCHED 也是终端状态，不需要也无法撤单
+  return s.includes("CANCEL") || s === "EXPIRED" || s === "REJECTED" || s === "FILLED" || s === "MATCHED";
 }
 
 function parseStringArray(raw: unknown): string[] {
@@ -578,7 +579,7 @@ async function cancelOrderBestEffort(
   trader: PolymarketTrader,
   orderId: string,
   context: { label: string; reason: string },
-): Promise<void> {
+): Promise<any> {
   try {
     const resp = await trader.cancelOrder(orderId);
     log(`[${context.label}] cancel order`, {
@@ -586,12 +587,14 @@ async function cancelOrderBestEffort(
       reason: context.reason,
       response: resp,
     });
+    return resp;
   } catch (err) {
     log(`[${context.label}] cancel order failed`, {
       orderId,
       reason: context.reason,
       error: err instanceof Error ? err.message : String(err),
     });
+    return null;
   }
 }
 
@@ -665,11 +668,19 @@ async function syncLiveOrdersAndCancelStale(
         && nowMs >= settleMs
         && !isCancelledOrderStatus(status)
       ) {
-        await cancelOrderBestEffort(trader, orderId, {
+        const cancelResponse = await cancelOrderBestEffort(trader, orderId, {
           label: t.targetId || "LIVE_ORDER",
           reason: matchedSize > 0 ? "cancel_remainder_at_settle" : "previous_market_unfilled",
         });
-        t.orderStatus = matchedSize > 0 ? "CANCELED_REMAINDER_AT_SETTLE" : "CANCELED_PREV_MARKET_UNFILLED";
+
+        // 如果 API 返回说订单找不到（说明已经在交易所侧取消或成交了），我们设置终结状态
+        const respStr = JSON.stringify(cancelResponse || "");
+        if (respStr.includes("can't be found") || respStr.includes("already canceled or matched")) {
+           t.orderStatus = "CANCELED_FINALIZED_BY_API";
+        } else {
+           t.orderStatus = matchedSize > 0 ? "CANCELED_REMAINDER_AT_SETTLE" : "CANCELED_PREV_MARKET_UNFILLED";
+        }
+
         canceled += 1;
         changed = true;
 
