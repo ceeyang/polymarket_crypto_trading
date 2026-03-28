@@ -396,7 +396,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   claimLog("fetching positions", { user });
   const { data } = await axios.get(`${cfg.dataApiHost}/positions`, {
-    params: { user, size: 1000, redeemable: true },
+    params: { user, size: 20, redeemable: true, mergeable: true },
     timeout: 20000,
   });
 
