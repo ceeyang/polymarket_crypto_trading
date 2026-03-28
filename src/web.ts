@@ -813,9 +813,47 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         const winMarkets = [];
         for (const m of marketsMap.values()) {
            m.isDoubleFill = m.hasYes && m.hasNo;
+
+           let yesMatched = 0; let yesPrice = 0;
+           let noMatched = 0; let noPrice = 0;
+           let resolvedWinSide = "";
+           let resolvedWinMatched = 0;
+           let resolvedWinPrice = 0;
+
+           for (const t of m.trades) {
+               const matched = toNumber(t.matchedSize);
+               const price = toNumber(t.entryPrice);
+               if (t.side === "YES" && matched > 0) { yesMatched += matched; yesPrice = price; }
+               if (t.side === "NO" && matched > 0) { noMatched += matched; noPrice = price; }
+               if (t.resolved && t.win) {
+                   resolvedWinSide = t.side;
+                   resolvedWinMatched = matched;
+                   resolvedWinPrice = price;
+               }
+           }
+
+           if (m.resolved) {
+               m.expectedPnl = m.totalPnl;
+               if (m.isDoubleFill) {
+                   m.winDetails = resolvedWinSide ? `链上派发致胜: [${resolvedWinSide}] ${resolvedWinMatched}份 @ $${resolvedWinPrice}` : `双杀未派发`;
+               } else {
+                   m.winDetails = resolvedWinSide ? `单边致胜: [${resolvedWinSide}] ${resolvedWinMatched}份 @ $${resolvedWinPrice}` : `暂无致胜方向`;
+               }
+           } else {
+               if (m.isDoubleFill) {
+                   m.winDetails = `双向锁单待结算 (YES: ${yesMatched}份@$${yesPrice} | NO: ${noMatched}份@$${noPrice})`;
+                   const minShares = Math.min(yesMatched, noMatched);
+                   m.expectedPnl = (minShares * 1.0) - m.totalNotional;
+               } else {
+                   m.winDetails = `等待结算中...`;
+                   m.expectedPnl = 0;
+               }
+           }
+
            // Record global sums regardless of resolution to reflect real-time overhead and captures
            sumTotalMatched += m.totalNotional;
-           sumTotalPnl += m.totalPnl;
+           sumTotalPnl += m.resolved ? m.totalPnl : (m.isDoubleFill ? m.expectedPnl : 0);
+
            if (m.isDoubleFill) sumDoubleFills++;
            else if (m.totalMatched > 0) sumSingleFills++;
 

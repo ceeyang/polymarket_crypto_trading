@@ -1365,26 +1365,28 @@
          winTableWrap.style.overflow = "auto";
          
          let rowsHtml = "";
-         for (const m of data.winMarkets) {
-            const isDouble = m.isDoubleFill;
-            const doubleBadge = isDouble ? `<span class="badge side-yes" style="font-size:10px">双边通吃</span>` : "";
-            const yieldPct = m.totalNotional > 0 ? (m.totalPnl / m.totalNotional * 100).toFixed(0) : "0";
-            rowsHtml += `
-               <tr style="border-bottom:1px solid #e7eef7;">
-                 <td style="padding:12px;"><strong>${escapeHtml(m.title)}</strong><div style="font-size:11px; color:var(--muted); margin-top:4px;">${fmtTime(m.entryTime)}</div></td>
-                 <td style="padding:12px;">${doubleBadge}</td>
-                 <td style="padding:12px;">$${fmtNumber(m.totalNotional, 4)}</td>
-                 <td style="padding:12px;">
-                    <span style="display:inline-block; padding:3px 6px; background:var(--success); color:#fff; border-radius:4px; font-weight:bold; font-size:12px;">
-                       超额回报 ${yieldPct}%
-                    </span>
-                 </td>
-                 <td style="padding:12px; font-weight:700; color:var(--success); font-size:16px;">
-                    +${fmtNumber(m.totalPnl, 4)} USDC
-                 </td>
-               </tr>
-            `;
-         }
+          for (const m of data.winMarkets) {
+             const isDouble = m.isDoubleFill;
+             const doubleBadge = isDouble ? `<span class="badge side-yes" style="font-size:10px">双边通吃</span>` : "";
+             const finalPnl = m.expectedPnl ?? m.totalPnl ?? 0;
+             const yieldPct = m.totalNotional > 0 ? (finalPnl / m.totalNotional * 100).toFixed(0) : "0";
+             const detailsHtml = m.winDetails ? `<div style="font-size:11.5px; color:var(--primary); margin-top:5px; font-weight:500;">${escapeHtml(m.winDetails)}</div>` : "";
+             rowsHtml += `
+                <tr style="border-bottom:1px solid #e7eef7;">
+                  <td style="padding:12px;"><strong>${escapeHtml(m.title)}</strong><div style="font-size:11px; color:var(--muted); margin-top:4px;">${fmtTime(m.entryTime)}</div></td>
+                  <td style="padding:12px;">${doubleBadge}${detailsHtml}</td>
+                  <td style="padding:12px;">$${fmtNumber(m.totalNotional, 4)}</td>
+                  <td style="padding:12px;">
+                     <span style="display:inline-block; padding:3px 6px; background:var(--success); color:#fff; border-radius:4px; font-weight:bold; font-size:12px;">
+                        超额回报 ${yieldPct}%
+                     </span>
+                  </td>
+                  <td style="padding:12px; font-weight:700; color:var(--success); font-size:16px;">
+                     +${fmtNumber(finalPnl, 4)} USDC
+                  </td>
+                </tr>
+             `;
+          }
          winTableWrap.innerHTML = `
             <table style="width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--border); border-radius:8px; overflow:hidden;">
               <thead style="background:#fdfdfd; border-bottom:1px solid var(--border);">
