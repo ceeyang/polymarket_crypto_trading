@@ -82,47 +82,7 @@ function asNumber(value: unknown): number {
 }
 
 function extractClaimableUsd(position: any): number {
-  const candidates = [
-    position?.claimableValue,
-    position?.claimable_value,
-    position?.claimableAmount,
-    position?.claimable_amount,
-    position?.redeemableValue,
-    position?.redeemable_value,
-    position?.payoutValue,
-    position?.payout_value,
-    position?.payout,
-    position?.currentValue,
-    position?.current_value,
-    position?.curValue,
-    position?.value,
-    position?.usdValue,
-    position?.usdcValue,
-    position?.finalValue,
-    position?.final_value,
-    position?.claimableAmount,
-    position?.redeemable_usd,
-    position?.total_payout_usd,
-    position?.payout_usd,
-    position?.payoutValue,
-    position?.payout_value,
-    position?.payout,
-    position?.currentValue,
-    position?.current_value,
-    position?.curValue,
-    position?.value,
-    position?.usdValue,
-    position?.usdcValue,
-    position?.finalValue,
-    position?.final_value,
-    position?.cashPnl,
-    position?.cash_pnl,
-  ]
-    .map((x) => asNumber(x))
-    .filter((x) => x > 0);
-
-  if (!candidates.length) return 0;
-  return Math.max(...candidates);
+  return asNumber(position?.currentValue);
 }
 
 function normalizePrivateKey(raw: string): Hex {
@@ -311,6 +271,8 @@ async function executeRedeem(
   logPrefix: string,
 ): Promise<void> {
   const metadata = `ctf redeem ${conditionId}`;
+  log(logPrefix, "preparing redeem transaction", { conditionId, txType });
+
   try {
     const existing = await findExistingRedeemTransaction(client, metadata);
     if (existing) {
@@ -359,13 +321,14 @@ async function executeRedeem(
         txHash: deployResult.transactionHash,
         safe: deployResult.proxyAddress,
       });
+      log(logPrefix, "resending original redeem transaction");
       response = await client.execute([tx], metadata);
     } else {
       throw err;
     }
   }
 
-  log(logPrefix, "submitted", {
+  log(logPrefix, "submitted to relayer", {
     conditionId,
     transactionID: response.transactionID,
     state: response.state,
@@ -435,15 +398,16 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   const redeemable = positions.filter((p: any) => {
     const isRedeemable = Boolean(p?.redeemable);
-    const size = Number(p?.size ?? p?.amount ?? 0);
+    const size = Number(p?.size ?? 0);
     const usd = extractClaimableUsd(p);
+    const curPrice = Number(p?.curPrice ?? 0);
 
-    if (isRedeemable && size > 0) return true;
+    if (isRedeemable && size > 0 && curPrice > 0) return true;
 
     // 增加详细诊断日志，仅在有 redeemable 标记但过滤失败时
     if (isRedeemable && size <= 0) {
       claimLog("position skipped", {
-        conditionId: p?.conditionId || p?.condition_id,
+        conditionId: p?.conditionId,
         size,
         usd,
         reason: "size <= 0"
@@ -459,19 +423,19 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   const whitelist = new Set((options?.conditionIds ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean));
   const actionablePositions = redeemable.filter((p: any) => {
-    const cid = normalizeConditionId(p?.conditionId ?? p?.condition_id);
+    const cid = normalizeConditionId(p?.conditionId);
     if (!cid) return false;
     if (whitelist.size && !whitelist.has(cid.toLowerCase())) return false;
     const usd = extractClaimableUsd(p);
     if (usd <= 0) {
-       // 虽然 redeemable 但价值为 0（大概率是个 loser token）
-       return false;
+      // 虽然 redeemable 但价值为 0（大概率是个 loser token）
+      return false;
     }
     return true;
   });
 
   const conditionIds = Array.from(new Set(
-    actionablePositions.map((p: any) => normalizeConditionId(p?.conditionId ?? p?.condition_id)!)
+    actionablePositions.map((p: any) => normalizeConditionId(p?.conditionId)!)
   ));
 
   const totalConditions = conditionIds.length;
