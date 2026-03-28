@@ -813,15 +813,14 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         const winMarkets = [];
         for (const m of marketsMap.values()) {
            m.isDoubleFill = m.hasYes && m.hasNo;
-           // Record global sums only for resolved
-           if (m.resolved) {
-              sumTotalMatched += m.totalNotional;
-              sumTotalPnl += m.totalPnl;
-              if (m.isDoubleFill) sumDoubleFills++;
-              else if (m.totalMatched > 0) sumSingleFills++;
-           }
+           // Record global sums regardless of resolution to reflect real-time overhead and captures
+           sumTotalMatched += m.totalNotional;
+           sumTotalPnl += m.totalPnl;
+           if (m.isDoubleFill) sumDoubleFills++;
+           else if (m.totalMatched > 0) sumSingleFills++;
+
            // Filter win condition: Must have double fill OR net outcome is > 0 overall
-           if (m.resolved && (m.isDoubleFill || m.totalPnl > 0)) {
+           if (m.isDoubleFill || (m.resolved && m.totalPnl > 0)) {
                winMarkets.push(m);
            }
         }
