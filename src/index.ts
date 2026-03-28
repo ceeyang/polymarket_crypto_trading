@@ -77,8 +77,8 @@ function formatDate(date: Date): string {
 function log(msg: string, obj?: unknown, tag = "system", level = "info") {
   const tsISO = new Date().toISOString();
   const tsDisplay = formatDate(new Date());
-  const tagPart = `[${tag}]`.padEnd(12);
-  const levelPart = `[${level}]`.padEnd(8);
+  const tagPart = `[${tag}]`.padEnd(16);
+  const levelPart = `[${level}]`.padEnd(10);
   const taggedMsg = `${tagPart} ${levelPart} ${msg}`;
 
   if (LOG_TO_STDOUT) {
@@ -875,14 +875,14 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       reconcileInFlightCount++;
       // 随机延迟防封
       await sleep(500 + Math.random() * 2000);
-      
+
       const res = await trader.getOrder(orderId);
       if (!res) return;
 
       const sizeMatched = Number(res.size_matched || res.matched_size || 0);
       const status = String(res.status || "UNKNOWN");
       const avgPrice = Number(res.average_filled_price || res.avg_price || 0);
-      
+
       state.updateTradeStatus(orderId, {
         matchedSize: sizeMatched,
         orderStatus: status,
