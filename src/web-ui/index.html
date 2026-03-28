@@ -896,21 +896,24 @@
         </div>
 
         <div class="trade-summary">
-          <div class="trade-stat"><span class="muted">总挂单记录</span><strong id="sTotal">0</strong></div>
-          <div class="trade-stat"><span class="muted">双边成交率 (挂上即胜)</span><strong id="sWinRate">0.00%</strong></div>
-          <div class="trade-stat"><span class="muted">单边平均成交深度</span><strong id="sFillRate">0.00%</strong></div>
-          <div class="trade-stat"><span class="muted">账户累计总盈亏</span><strong id="sPnL">$0.0000</strong></div>
+          <div class="trade-stat"><span class="muted" title="所有真实吃单的实际花销">总试错过路费</span><strong id="sTotalCost">$0.00</strong></div>
+          <div class="trade-stat"><span class="muted" title="真实单边被吃次数（必定亏损）">已损失的单边过路</span><strong id="sSingles" style="color:var(--danger)">0 次</strong></div>
+          <div class="trade-stat"><span class="muted" title="发生插针，成功吃到双边！">完美双吃打针回本</span><strong id="sDoubles" style="color:var(--success)">0 次</strong></div>
+          <div class="trade-stat"><span class="muted">账户累计链上纯利</span><strong id="sPnL">$0.0000</strong></div>
         </div>
 
         <div class="section trade-table-card">
           <div class="trade-table-head">
             <div>
-              <h2>各币种盘口记录</h2>
-              <div class="muted">按资产分组，汇总显示每个盘口的双边订单、成交量、成交率以及基于链上实际结算的真实盈亏。</div>
+              <h2>各盘口多维吃针深度与胜利列表</h2>
+              <div class="muted">
+                上半部分：按不同预测目标动态统计你各个挂单层级（如0.01, 0.02）的真实吃单率与收益率。<br>
+                下半部分：仅展示真正捕捉到画门（发生完美双边或有正向链上纯利）的猎物明细。
+              </div>
             </div>
           </div>
           <div class="trade-table-wrap" style="padding-bottom: 20px;">
-            <div id="coinTradesWrapper"></div>
+            <div id="analysisWrapper"></div>
           </div>
         </div>
       </div>
@@ -1016,6 +1019,12 @@
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
+    }
+
+    function isCancelledTrade(t) {
+      if (!t || !t.orderStatus) return false;
+      const status = String(t.orderStatus).trim().toUpperCase();
+      return status.includes("CANCEL") || status === "EXPIRED" || status === "REJECTED";
     }
 
     function fmtTime(value) {
@@ -1303,98 +1312,132 @@
       tradeTarget.value = prev;
     }
 
-    function renderTradeSummary(summary) {
-      document.getElementById("sTotal").textContent = String(summary?.total ?? 0);
-      document.getElementById("sWinRate").textContent = fmtPct(summary?.winRate ?? 0);
-      document.getElementById("sFillRate").textContent = fmtPct(summary?.avgFillRate ?? 0);
-      document.getElementById("sPnL").textContent = (summary?.totalPnL >= 0 ? "+" : "") + 
-        fmtNumber(summary?.totalPnL, 4) + " USDC";
-    }
+    function renderAnalysisDashboard(data) {
+      document.getElementById("sTotalCost").textContent = "$" + fmtNumber(data.summary?.cost ?? 0, 2);
+      document.getElementById("sSingles").textContent = (data.summary?.singles ?? 0) + " 次";
+      document.getElementById("sDoubles").textContent = (data.summary?.doubles ?? 0) + " 次";
+      const pnl = data.summary?.pnl ?? 0;
+      document.getElementById("sPnL").textContent = (pnl >= 0 ? "+" : "") + fmtNumber(pnl, 4) + " USDC";
+      document.getElementById("sPnL").style.color = pnl >= 0 ? "var(--success)" : "var(--danger)";
 
-    function renderTradesByCoin(coins) {
-      const wrapper = document.getElementById("coinTradesWrapper");
+      const wrapper = document.getElementById("analysisWrapper");
       wrapper.innerHTML = "";
-      if (!Array.isArray(coins) || !coins.length) {
-        wrapper.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted)">暂无交易记录，等待下一个盘口开盘后刷新。</div>';
+
+      if (!data.targets || (data.targets.length === 0 && data.winMarkets.length === 0)) {
+        wrapper.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted)">暂无数据，等待底层的异步收集...</div>';
         return;
       }
 
-      for (const coin of coins) {
-        const coinCard = document.createElement("div");
-        coinCard.style.marginBottom = "24px";
-        coinCard.innerHTML = `
-          <h3 style="margin: 0 0 12px 0; border-bottom: 2px solid var(--border); padding-bottom: 6px;">
-            <span style="font-size: 20px; color: var(--primary-2)">币种: ${escapeHtml(coin.coin)}</span>
-            <span style="margin-left:16px; font-size: 14px; font-weight: normal; color: var(--muted)">累计真实收益: <strong style="color: ${coin.totalPnl >= 0 ? 'var(--success)' : 'var(--danger)'}">${coin.totalPnl >= 0 ? '+' : ''}${fmtNumber(coin.totalPnl, 4)} USDC</strong></span>
-            <span style="margin-left:16px; font-size: 14px; font-weight: normal; color: var(--muted)">总成交额: $${fmtNumber(coin.totalNotional, 4)}</span>
-          </h3>
-        `;
+      // --- Part 1: Tiers Analysis ---
+      const tiersSection = document.createElement("div");
+      tiersSection.innerHTML = `<h3 style="margin:20px 18px 10px; font-size:16px;">📊 各盘口挂单深度成功率 (只显示有历史痕迹的层级)</h3>`;
+      
+      const grid = document.createElement("div");
+      grid.style.display = "grid";
+      grid.style.gridTemplateColumns = "repeat(auto-fill, minmax(360px, 1fr))";
+      grid.style.gap = "16px";
+      grid.style.padding = "0 18px";
+      
+      for (const tg of data.targets) {
+        if (!tg.tiers || tg.tiers.length === 0) continue;
+        const tgCard = document.createElement("div");
+        tgCard.style.border = "1px solid var(--border)";
+        tgCard.style.borderRadius = "12px";
+        tgCard.style.background = "#fff";
+        tgCard.style.overflow = "hidden";
         
-        for (const m of coin.markets) {
-           const marketDiv = document.createElement("div");
-           marketDiv.style.marginBottom = "16px";
-           marketDiv.style.border = "1px solid #e7eef7";
-           marketDiv.style.borderRadius = "10px";
-           marketDiv.style.overflow = "hidden";
-           
-           const headBg = m.totalPnl > 0 ? 'rgba(6, 118, 71, 0.05)' : (m.totalPnl < 0 ? 'rgba(180, 35, 24, 0.05)' : '#f9f9f9');
-           const pnlColor = m.totalPnl >= 0 ? 'var(--success)' : 'var(--danger)';
-           const fillRate = (m.fillRate * 100).toFixed(2);
-           const returnRate = m.totalNotional > 0 ? ((m.totalPnl / m.totalNotional) * 100).toFixed(2) : "0.00";
-
-           let tradesHtml = "";
-           for (const t of m.trades) {
-              const statusClass = t.resolved ? (t.win ? "win" : "lose") : (isCancelledTrade(t) ? "canceled" : "pending");
-              const statusTextLabel = t.resolved ? (t.win ? "胜利" : "失败") : (isCancelledTrade(t) ? "已撤销" : "挂单中");
-              const sideClass = String(t.side || "").toUpperCase() === "YES" ? "side-yes" : "side-no";
-              const pPrice = fmtNumber(t.entryPrice, 4);
-              const notional = fmtNumber(Number(t.matchedSize || 0) * Number(t.entryPrice || 0), 4);
-              const pnl = t.resolved ? fmtNumber(t.officialPnlUsd != null ? t.officialPnlUsd : (t.win ? ((t.matchedSize || 0) * (1.0 - t.entryPrice)) : -notional), 4) : "-";
-
-              tradesHtml += `
-                 <tr style="background: #fff;">
-                   <td style="padding-left: 16px;"><span class="badge ${sideClass}">${escapeHtml(t.side)}</span></td>
-                   <td><span class="code-chip" title="${escapeHtml(t.orderId || '')}">${escapeHtml(compactId(t.orderId || ''))}</span></td>
-                   <td>${pPrice}</td>
-                   <td>${fmtNumber(t.orderPlanShareSize, 0)}</td>
-                   <td>${fmtNumber(t.matchedSize, 2)} / $${notional}</td>
-                   <td><span class="badge ${statusClass}">${escapeHtml(statusTextLabel)}</span></td>
-                   <td style="font-weight: 600; color: ${pnl !== '-' && parseFloat(pnl) >= 0 ? 'var(--success)' : (pnl !== '-' ? 'var(--danger)' : 'inherit')}">${pnl !== '-' && parseFloat(pnl) > 0 ? '+' : ''}${pnl}</td>
-                 </tr>
-              `;
-           }
-
-           marketDiv.innerHTML = `
-              <div style="background: ${headBg}; padding: 12px 16px; border-bottom: 1px solid #e7eef7;">
-                <div style="font-weight:600; font-size: 15px;">${escapeHtml(m.title)}</div>
-                <div style="margin-top: 6px; font-size: 13px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap;">
-                  <span>成交率: <strong style="color:var(--text)">${fillRate}%</strong> (${fmtNumber(m.totalMatched, 2)}/${fmtNumber(m.totalPlanned, 0)}份)</span>
-                  <span>真实收益: <strong style="color:${pnlColor}">${m.totalPnl >= 0 ? '+' : ''}${fmtNumber(m.totalPnl, 4)} USDC</strong></span>
-                  <span>收益率: <strong style="color:${pnlColor}">${m.totalPnl > 0 ? '+' : ''}${returnRate}%</strong></span>
-                  <span>开盘时间: ${fmtTime(m.entryTime)}</span>
-                </div>
-              </div>
-              <table style="width: 100%; border-collapse: collapse;">
-                <thead style="background: #fdfdfd;">
-                  <tr>
-                    <th style="padding-left: 16px;">方向</th>
-                    <th>订单ID</th>
-                    <th>成交价</th>
-                    <th>计划份数</th>
-                    <th>真实成交 / 真实下单金额</th>
-                    <th>胜利状态</th>
-                    <th>订单真实收益</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${tradesHtml}
-                </tbody>
-              </table>
+        let rowsHtml = "";
+        for (const tier of tg.tiers) {
+           const fillRate = tier.planned > 0 ? (tier.matched / tier.planned * 100).toFixed(2) : "0.00";
+           const pnlColor = tier.pnl >= 0 ? 'var(--success)' : 'var(--danger)';
+           rowsHtml += `
+              <tr>
+                <td style="font-weight:600; padding:10px;">$${tier.price}</td>
+                <td style="padding:10px;">${fmtNumber(tier.matched, 1)} / ${fmtNumber(tier.planned, 0)}</td>
+                <td style="padding:10px;">${fillRate}%</td>
+                <td style="padding:10px; color:${pnlColor}; font-weight:600;">${tier.pnl >= 0 ? '+' : ''}${fmtNumber(tier.pnl, 2)}</td>
+              </tr>
            `;
-           coinCard.appendChild(marketDiv);
         }
-        wrapper.appendChild(coinCard);
+        
+        tgCard.innerHTML = `
+          <div style="background: rgba(15,118,110,0.06); padding:10px 14px; font-weight:600; border-bottom:1px solid var(--border);">
+             盘口目标: ${escapeHtml(tg.targetId)}
+          </div>
+          <table style="width:100%; text-align:left; font-size:13px; border-collapse:collapse;">
+             <thead>
+               <tr style="border-bottom: 2px solid var(--border);">
+                 <th style="padding:8px 10px; color:var(--muted)">单前水位</th>
+                 <th style="padding:8px 10px; color:var(--muted)">实吃股数/计划</th>
+                 <th style="padding:8px 10px; color:var(--muted)">打针成交率</th>
+                 <th style="padding:8px 10px; color:var(--muted)">层级净盈亏</th>
+               </tr>
+             </thead>
+             <tbody>
+                ${rowsHtml}
+             </tbody>
+          </table>
+        `;
+        grid.appendChild(tgCard);
       }
+      tiersSection.appendChild(grid);
+      wrapper.appendChild(tiersSection);
+
+      // --- Part 2: Winning Markets ---
+      const winSection = document.createElement("div");
+      winSection.style.marginTop = "32px";
+      winSection.innerHTML = `
+         <h3 style="margin:20px 18px 10px; font-size:16px;">🏆 完美捕获画门明细（仅展示真正赚钱的盘口）</h3>
+         <div style="padding: 0 18px; margin-bottom: 12px; color: var(--muted); font-size: 13px;">
+            提示: 所有失败的单边过路费已被系统隐藏，你在这里看到的都是极速插针为你带来百倍收益的成功之作。
+         </div>
+      `;
+
+      if (data.winMarkets.length === 0) {
+         winSection.innerHTML += `<div style="padding: 20px 18px; color:var(--muted); font-style:italic;">暂未捕获任何画门双吃盘口，耐心等待极端行情...</div>`;
+      } else {
+         const winTableWrap = document.createElement("div");
+         winTableWrap.style.padding = "0 18px";
+         winTableWrap.style.overflow = "auto";
+         
+         let rowsHtml = "";
+         for (const m of data.winMarkets) {
+            const isDouble = m.isDoubleFill;
+            const doubleBadge = isDouble ? `<span class="badge side-yes" style="font-size:10px">双边通吃</span>` : "";
+            const yieldPct = m.totalNotional > 0 ? (m.totalPnl / m.totalNotional * 100).toFixed(0) : "0";
+            rowsHtml += `
+               <tr style="border-bottom:1px solid #e7eef7;">
+                 <td style="padding:12px;"><strong>${escapeHtml(m.title)}</strong><div style="font-size:11px; color:var(--muted); margin-top:4px;">${fmtTime(m.entryTime)}</div></td>
+                 <td style="padding:12px;">${doubleBadge}</td>
+                 <td style="padding:12px;">$${fmtNumber(m.totalNotional, 4)}</td>
+                 <td style="padding:12px;">
+                    <span style="display:inline-block; padding:3px 6px; background:var(--success); color:#fff; border-radius:4px; font-weight:bold; font-size:12px;">
+                       超额回报 ${yieldPct}%
+                    </span>
+                 </td>
+                 <td style="padding:12px; font-weight:700; color:var(--success); font-size:16px;">
+                    +${fmtNumber(m.totalPnl, 4)} USDC
+                 </td>
+               </tr>
+            `;
+         }
+         winTableWrap.innerHTML = `
+            <table style="width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--border); border-radius:8px; overflow:hidden;">
+              <thead style="background:#fdfdfd; border-bottom:1px solid var(--border);">
+                 <tr>
+                    <th style="padding:12px; text-align:left;">绝杀盘口</th>
+                    <th style="padding:12px; text-align:left;">状态</th>
+                    <th style="padding:12px; text-align:left;">双边联合耗资</th>
+                    <th style="padding:12px; text-align:left;">收益杠杆率</th>
+                    <th style="padding:12px; text-align:left;">最终链上派发</th>
+                 </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+         `;
+         winSection.appendChild(winTableWrap);
+      }
+      wrapper.appendChild(winSection);
     }
 
     function renderPredictions(items) {
@@ -1504,41 +1547,16 @@
 
     async function loadTrades() {
       try {
-        const query = new URLSearchParams({});
-        if (tradeQuery.targetId) query.set("targetId", tradeQuery.targetId);
-        if (tradeQuery.resolved) query.set("resolved", tradeQuery.resolved);
+        const resp = await apiFetch("/api/trades/analysis");
+        const data = await resp.json();
         
-        // 1. Fetch flat summary for top section
-        const respFlat = await apiFetch(`/api/trades?${query.toString()}`);
-        const dataFlat = await respFlat.json();
-        if (respFlat.ok && dataFlat.summary) {
-           renderTradeSummary(dataFlat.summary);
-        }
-
-        // 2. Fetch deep structured coin-grouped data for list
-        const respCoin = await apiFetch("/api/trades/by-coin");
-        const dataCoin = await respCoin.json();
-        if (respCoin.ok) {
-           let coinsData = Array.isArray(dataCoin.coins) ? dataCoin.coins : [];
-           
+        if (resp.ok) {
            // Apply client-side filters if needed
            if (tradeQuery.targetId) {
-             const targetMatch = tradeQuery.targetId.split('-')[0].toUpperCase();
-             coinsData = coinsData.filter(c => c.coin === targetMatch);
+             data.targets = data.targets.filter(t => t.targetId === tradeQuery.targetId);
+             data.winMarkets = data.winMarkets.filter(m => m.targetId === tradeQuery.targetId);
            }
-           if (tradeQuery.resolved === "true") {
-             coinsData.forEach(c => {
-               c.markets = c.markets.filter(m => m.trades.every(t => t.resolved || isCancelledTrade(t)));
-             });
-             coinsData = coinsData.filter(c => c.markets.length > 0);
-           } else if (tradeQuery.resolved === "false") {
-             coinsData.forEach(c => {
-               c.markets = c.markets.filter(m => m.trades.some(t => !t.resolved && !isCancelledTrade(t)));
-             });
-             coinsData = coinsData.filter(c => c.markets.length > 0);
-           }
-
-           renderTradesByCoin(coinsData);
+           renderAnalysisDashboard(data);
         }
 
         tradeStatus.textContent = `更新于 ${new Date().toLocaleTimeString()}`;

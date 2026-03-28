@@ -218,7 +218,7 @@ function summarizeTrades(trades: LiveTradeRecord[]): {
 } {
   const settled = trades.filter((t) => t.resolved && !isCancelledTrade(t));
   const wins = settled.filter((t) => t.win).length;
-  
+
   let totalPlannedSize = 0;
   let totalFilledSize = 0;
   let totalPnL = 0;
@@ -228,7 +228,7 @@ function summarizeTrades(trades: LiveTradeRecord[]): {
   for (const t of trades) {
     totalPlannedSize += (t.orderPlanShareSize || 0);
     totalFilledSize += (t.matchedSize || 0);
-    
+
     // 按市场分组统计双边成交
     if (!marketMap.has(t.marketId)) {
       marketMap.set(t.marketId, { yes: 0, no: 0 });
@@ -243,13 +243,13 @@ function summarizeTrades(trades: LiveTradeRecord[]): {
       if (t.officialPnlUsd != null) {
         totalPnL += t.officialPnlUsd;
       } else {
-         const matched = t.matchedSize || 0;
-         const price = t.entryPrice || 0;
-         if (t.win) {
-           totalPnL += (matched * (1.0 - price));
-         } else {
-           totalPnL -= (matched * price);
-         }
+        const matched = t.matchedSize || 0;
+        const price = t.entryPrice || 0;
+        if (t.win) {
+          totalPnL += (matched * (1.0 - price));
+        } else {
+          totalPnL -= (matched * price);
+        }
       }
     }
   }
@@ -468,27 +468,30 @@ function getBotControlView(): {
 }
 
 export function startServer(port = PORT, options?: { silent?: boolean }): http.Server {
+  let _analysisCache: any = null;
+  let _analysisCacheTime = 0;
+
   function formatDate(date: Date): string {
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  const h = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `${m}-${d} ${h}:${min}`;
-}
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    const h = String(date.getHours()).padStart(2, "0");
+    const min = String(date.getMinutes()).padStart(2, "0");
+    return `${m}-${d} ${h}:${min}`;
+  }
 
-function webLog(msg: string, obj?: unknown, tag = "web-claim", level = "info") {
-  const tsISO = new Date().toISOString();
-  const tsDisplay = formatDate(new Date());
-  const tagPart = `[${tag}]`.padEnd(16);
-  const levelPart = `[${level}]`.padEnd(10);
-  const taggedMsg = `${tagPart} ${levelPart} ${msg}`;
-  const line = JSON.stringify({ ts: tsISO, msg: `${tsDisplay} ${taggedMsg}`, data: obj }) + "\n";
-  try {
-    fs.appendFileSync(LOG_FILE, line, "utf8");
-  } catch {}
-}
+  function webLog(msg: string, obj?: unknown, tag = "web-claim", level = "info") {
+    const tsISO = new Date().toISOString();
+    const tsDisplay = formatDate(new Date());
+    const tagPart = `[${tag}]`.padEnd(16);
+    const levelPart = `[${level}]`.padEnd(10);
+    const taggedMsg = `${tagPart} ${levelPart} ${msg}`;
+    const line = JSON.stringify({ ts: tsISO, msg: `${tsDisplay} ${taggedMsg}`, data: obj }) + "\n";
+    try {
+      fs.appendFileSync(LOG_FILE, line, "utf8");
+    } catch { }
+  }
 
-const server = http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     try {
       const method = req.method || "GET";
       const parsedUrl = new URL(req.url || "/", `http://127.0.0.1:${port}`);
@@ -717,76 +720,127 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      if (method === "GET" && pathname === "/api/trades/by-coin") {
-        const state = stateStore.load();
-        const trades = state.trades || [];
-        const coins = new Map<string, any>();
-        
-        for (const t of trades) {
-          const coin = String(t.coin || "UNKNOWN").toUpperCase();
-          if (!coins.has(coin)) {
-             coins.set(coin, { coin, markets: new Map<string, any>() });
-          }
-          const cm = coins.get(coin).markets;
-          if (!cm.has(t.marketId)) {
-             cm.set(t.marketId, {
-                marketId: t.marketId,
-                title: t.marketTitle || t.targetId || "Unknown Market",
-                entryTime: t.entryTime,
-                settleTime: t.settleTime,
-                trades: []
-             });
-          }
-          cm.get(t.marketId).trades.push(t);
+      if (method === "GET" && pathname === "/api/trades/analysis") {
+        const nowMs = Date.now();
+        if (_analysisCache && (nowMs - _analysisCacheTime < 3000)) {
+          sendJson(res, 200, _analysisCache);
+          return;
         }
 
-        const result = Array.from(coins.values()).map(c => {
-          c.markets = Array.from(c.markets.values()).map((m: any) => {
-             m.trades.sort((a: any, b: any) => Date.parse(a.entryTime) - Date.parse(b.entryTime));
-             let totalPlanned = 0;
-             let totalMatched = 0;
-             let totalNotional = 0;
-             let totalPnl = 0;
-             
-             let hasYes = false;
-             let hasNo = false;
+        const state = stateStore.load();
+        const trades = state.trades || [];
+        
+        const targetsMap = new Map<string, any>();
+        const marketsMap = new Map<string, any>();
+        let sumTotalMatched = 0;
+        let sumTotalPnl = 0;
+        let sumDoubleFills = 0;
+        let sumSingleFills = 0;
 
-             for (const t of m.trades) {
-               totalPlanned += toNumber(t.orderPlanShareSize);
-               const matched = toNumber(t.matchedSize);
-               totalMatched += matched;
-               totalNotional += matched * toNumber(t.entryPrice);
-               
-               if (t.side === "YES" && matched > 0) hasYes = true;
-               if (t.side === "NO" && matched > 0) hasNo = true;
-
-               if (t.resolved) {
-                 if (t.officialPnlUsd != null) {
-                   totalPnl += t.officialPnlUsd;
-                 } else {
-                   totalPnl += t.win ? (matched * (1.0 - toNumber(t.entryPrice))) : -(matched * toNumber(t.entryPrice));
-                 }
-               }
-             }
-
-             return {
-               ...m,
-               totalPlanned,
-               totalMatched,
-               totalNotional,
-               totalPnl,
-               isFullPair: hasYes && hasNo,
-               fillRate: totalPlanned > 0 ? (totalMatched / totalPlanned) : 0
+        for (const t of trades) {
+          // Fill market grouping
+          let cm = marketsMap.get(t.marketId);
+          if (!cm) {
+             cm = {
+                marketId: t.marketId,
+                title: t.marketTitle || "Unknown Market",
+                targetId: t.targetId || "UNKNOWN",
+                entryTime: t.entryTime,
+                settleTime: t.settleTime,
+                trades: [],
+                hasYes: false,
+                hasNo: false,
+                totalMatched: 0,
+                totalPlanned: 0,
+                totalNotional: 0,
+                totalPnl: 0,
+                resolved: true
              };
-          }).sort((a: any, b: any) => Date.parse(b.entryTime) - Date.parse(a.entryTime));
+             marketsMap.set(t.marketId, cm);
+          }
+          cm.trades.push(t);
           
-          c.totalPnl = c.markets.reduce((acc: number, m: any) => acc + m.totalPnl, 0);
-          c.totalMatched = c.markets.reduce((acc: number, m: any) => acc + m.totalMatched, 0);
-          c.totalNotional = c.markets.reduce((acc: number, m: any) => acc + m.totalNotional, 0);
-          return c;
-        });
+          if (!t.resolved) cm.resolved = false;
+          const matched = toNumber(t.matchedSize);
+          const price = toNumber(t.entryPrice);
+          cm.totalPlanned += toNumber(t.orderPlanShareSize);
+          cm.totalMatched += matched;
+          cm.totalNotional += matched * price;
+          
+          if (t.side === "YES" && matched > 0) cm.hasYes = true;
+          if (t.side === "NO" && matched > 0) cm.hasNo = true;
+          
+          if (t.resolved) {
+            if (t.officialPnlUsd != null) {
+              cm.totalPnl += t.officialPnlUsd;
+            } else {
+              cm.totalPnl += t.win ? (matched * (1.0 - price)) : -(matched * price);
+            }
+          }
 
-        sendJson(res, 200, { coins: result });
+          // Dynamic Price Tiers per target
+          const target = String(t.targetId || "UNKNOWN_TARGET");
+          let tg = targetsMap.get(target);
+          if (!tg) {
+             tg = { targetId: target, tiers: new Map<string, any>() };
+             targetsMap.set(target, tg);
+          }
+          const priceKey = toNumber(t.orderPlanPrice).toFixed(3);
+          let tier = tg.tiers.get(priceKey);
+          if (!tier) {
+             tier = { price: Number(priceKey), planned: 0, matched: 0, cost: 0, pnl: 0 };
+             tg.tiers.set(priceKey, tier);
+          }
+          tier.planned += toNumber(t.orderPlanShareSize);
+          tier.matched += matched;
+          tier.cost += matched * price;
+          if (t.resolved) {
+             if (t.officialPnlUsd != null) {
+               tier.pnl += t.officialPnlUsd;
+             } else {
+               tier.pnl += t.win ? (matched * (1.0 - price)) : -(matched * price);
+             }
+          }
+        }
+
+        const winMarkets = [];
+        for (const m of marketsMap.values()) {
+           m.isDoubleFill = m.hasYes && m.hasNo;
+           // Record global sums only for resolved
+           if (m.resolved) {
+              sumTotalMatched += m.totalNotional;
+              sumTotalPnl += m.totalPnl;
+              if (m.isDoubleFill) sumDoubleFills++;
+              else if (m.totalMatched > 0) sumSingleFills++;
+           }
+           // Filter win condition: Must have double fill OR net outcome is > 0 overall
+           if (m.resolved && (m.isDoubleFill || m.totalPnl > 0)) {
+               winMarkets.push(m);
+           }
+        }
+        winMarkets.sort((a, b) => Date.parse(b.entryTime) - Date.parse(a.entryTime));
+
+        const targetData = Array.from(targetsMap.values()).map(tg => {
+           return {
+              targetId: tg.targetId,
+              tiers: Array.from(tg.tiers.values()).sort((a: any, b: any) => b.price - a.price)
+           };
+        });
+        targetData.sort((a,b) => a.targetId.localeCompare(b.targetId));
+
+        _analysisCache = {
+           summary: {
+              cost: sumTotalMatched,
+              pnl: sumTotalPnl,
+              doubles: sumDoubleFills,
+              singles: sumSingleFills
+           },
+           targets: targetData,
+           winMarkets
+        };
+        _analysisCacheTime = Date.now();
+
+        sendJson(res, 200, _analysisCache);
         return;
       }
 
