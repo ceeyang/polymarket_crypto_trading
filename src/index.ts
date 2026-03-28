@@ -77,8 +77,8 @@ function formatDate(date: Date): string {
 function log(msg: string, obj?: unknown, tag = "system", level = "info") {
   const tsISO = new Date().toISOString();
   const tsDisplay = formatDate(new Date());
-  const tagPart = `[${tag}]`.padEnd(16);
-  const levelPart = `[${level}]`.padEnd(10);
+  const tagPart = `[${tag}]`.padEnd(12);
+  const levelPart = `[${level}]`.padEnd(8);
   const taggedMsg = `${tagPart} ${levelPart} ${msg}`;
 
   if (LOG_TO_STDOUT) {
@@ -694,9 +694,9 @@ async function syncLiveOrdersAndCancelStale(
         // 如果 API 返回说订单找不到（说明已经在交易所侧取消或成交了），我们设置终结状态
         const respStr = JSON.stringify(cancelResponse || "");
         if (respStr.includes("can't be found") || respStr.includes("already canceled or matched")) {
-           t.orderStatus = "CANCELED_FINALIZED_BY_API";
+          t.orderStatus = "CANCELED_FINALIZED_BY_API";
         } else {
-           t.orderStatus = matchedSize > 0 ? "CANCELED_REMAINDER_AT_SETTLE" : "CANCELED_PREV_MARKET_UNFILLED";
+          t.orderStatus = matchedSize > 0 ? "CANCELED_REMAINDER_AT_SETTLE" : "CANCELED_PREV_MARKET_UNFILLED";
         }
 
         canceled += 1;
