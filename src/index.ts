@@ -835,9 +835,8 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   let lastAutoClaimAtMs = 0;
   let autoClaimInFlight = false;
   let autoClaimRunSeq = 0;
+  let cancelStaleInFlight = false;
   let lastScanEnabled: boolean | null = null;
-  let maintenanceInFlight = false;
-  let maintenanceRunSeq = 0;
   let liveSyncCursor = 0;
 
   const reloadRuntime = async (reason: string): Promise<RuntimeContext> => {
@@ -1154,102 +1153,97 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         }
       }
 
-      if (!maintenanceInFlight) {
-        const maintenanceRunId = ++maintenanceRunSeq;
-        maintenanceInFlight = true;
-        const maintenanceCfg = cfg;
-        const maintenanceTrader = trader;
-
-        // Run housekeeping after order placement so slow sync/claim work
-        // never delays the entry window for the current cycle.
+      // ── 异步撤销过期/已结算挂单（独立 inFlight，不阻塞主循环）─────────────────
+      if (!cancelStaleInFlight && !cfg.dryRun) {
+        cancelStaleInFlight = true;
+        const cancelCfg = cfg;
+        const cancelTrader = trader;
         void (async () => {
           try {
-            if (!maintenanceCfg.dryRun) {
-              const liveSync = await syncLiveOrdersAndCancelStale(state, maintenanceTrader, {
-                maxChecks: LIVE_SYNC_MAX_CHECKS,
-                cursor: liveSyncCursor,
-              });
-              liveSyncCursor = liveSync.nextCursor;
-              if (liveSync.updated > 0 || liveSync.canceled > 0 || liveSync.finalizedCanceled > 0 || liveSync.totalCandidates > LIVE_SYNC_MAX_CHECKS) {
-                log("live order sync", liveSync);
-              }
-
-              const official = await settleLiveTradesWithOfficial(maintenanceCfg, state, 0);
-              if (official.resolved > 0) {
-                log("official settlement synced", official);
-              }
+            const liveSync = await syncLiveOrdersAndCancelStale(state, cancelTrader, {
+              maxChecks: LIVE_SYNC_MAX_CHECKS,
+              cursor: liveSyncCursor,
+            });
+            liveSyncCursor = liveSync.nextCursor;
+            if (liveSync.updated > 0 || liveSync.canceled > 0 || liveSync.finalizedCanceled > 0 || liveSync.totalCandidates > LIVE_SYNC_MAX_CHECKS) {
+              log("[cancel-stale] live order sync", liveSync);
             }
 
-            const dryRunOfficial = await settleDryRunTradesWithOfficial(maintenanceCfg, state, 0);
-            if (dryRunOfficial.resolved > 0 || dryRunOfficial.reconciled > 0) {
-              log("dry-run official settlement synced", dryRunOfficial);
+            const official = await settleLiveTradesWithOfficial(cancelCfg, state, 0);
+            if (official.resolved > 0) {
+              log("[cancel-stale] official settlement synced", official);
             }
-
-            if (maintenanceCfg.autoClaim && !maintenanceCfg.dryRun && !autoClaimInFlight) {
-              const nowMs = Date.now();
-              if (nowMs - lastAutoClaimAtMs >= maintenanceCfg.claimIntervalSec * 1000) {
-                const runId = ++autoClaimRunSeq;
-                autoClaimInFlight = true;
-                lastAutoClaimAtMs = nowMs;
-                const cfgForClaim = maintenanceCfg;
-                const startedAtMs = Date.now();
-                log("auto claim started", {
-                  runId,
-                  timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
-                });
-
-                const claimPromise = claimRedeemablePositions(cfgForClaim, {
-                  logPrefix: "[auto-claim]",
-                  quietNoop: true,
-                  maxConcurrency: 3,
-                });
-
-                // Keep the main trading loop independent from relayer latency. We bound
-                // the awaited window here so a slow or stuck redeem flow cannot stall
-                // future bot rounds or leave auto-claim permanently wedged.
-                claimPromise.catch((err) => {
-                  log("auto claim late error", {
-                    runId,
-                    error: err instanceof Error ? err.message : err,
-                  });
-                });
-
-                void Promise.race<AutoClaimRaceResult>([
-                  claimPromise.then((summary) => ({ kind: "result", summary })),
-                  sleep(AUTO_CLAIM_MAX_RUNTIME_MS).then(() => ({ kind: "timeout" as const })),
-                ])
-                  .then((outcome) => {
-                    if (outcome.kind === "timeout") {
-                      log("auto claim timed out", {
-                        runId,
-                        timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
-                        elapsedMs: Date.now() - startedAtMs,
-                      });
-                      return;
-                    }
-                    const claimSummary = outcome.summary;
-                    if (claimSummary.reason !== "no redeemable condition ids") {
-                      log("auto claim result", claimSummary);
-                    }
-                  })
-                  .catch((err) => {
-                    log("auto claim error", err instanceof Error ? err.message : err);
-                  })
-                  .finally(() => {
-                    if (runId === autoClaimRunSeq) {
-                      autoClaimInFlight = false;
-                    }
-                  });
-              }
-            }
-          } catch (maintenanceErr) {
-            log("background maintenance error", maintenanceErr instanceof Error ? maintenanceErr.message : maintenanceErr);
+          } catch (err) {
+            log("[cancel-stale] error", err instanceof Error ? err.message : err);
           } finally {
-            if (maintenanceRunId === maintenanceRunSeq) {
-              maintenanceInFlight = false;
-            }
+            cancelStaleInFlight = false;
           }
         })();
+      }
+
+      // dry-run 结算（同样异步，不等待）
+      void settleDryRunTradesWithOfficial(cfg, state, 0)
+        .then((dryRunOfficial) => {
+          if (dryRunOfficial.resolved > 0 || dryRunOfficial.reconciled > 0) {
+            log("dry-run official settlement synced", dryRunOfficial);
+          }
+        })
+        .catch((err) => {
+          log("dry-run settle error", err instanceof Error ? err.message : err);
+        });
+
+      // ── 异步领取可领取收益（独立 inFlight，不阻塞主循环）──────────────────────
+      if (cfg.autoClaim && !cfg.dryRun && !autoClaimInFlight) {
+        const nowMs = Date.now();
+        if (nowMs - lastAutoClaimAtMs >= cfg.claimIntervalSec * 1000) {
+          const runId = ++autoClaimRunSeq;
+          autoClaimInFlight = true;
+          lastAutoClaimAtMs = nowMs;
+          const cfgForClaim = cfg;
+          const startedAtMs = Date.now();
+          log("[auto-claim] started", { runId, timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS });
+
+          const claimPromise = claimRedeemablePositions(cfgForClaim, {
+            logPrefix: "[auto-claim]",
+            quietNoop: true,
+            maxConcurrency: 3,
+          });
+
+          // 独立监听 late error，不影响 race 结果
+          claimPromise.catch((err) => {
+            log("[auto-claim] late error", {
+              runId,
+              error: err instanceof Error ? err.message : err,
+            });
+          });
+
+          void Promise.race<AutoClaimRaceResult>([
+            claimPromise.then((summary) => ({ kind: "result" as const, summary })),
+            sleep(AUTO_CLAIM_MAX_RUNTIME_MS).then(() => ({ kind: "timeout" as const })),
+          ])
+            .then((outcome) => {
+              if (outcome.kind === "timeout") {
+                log("[auto-claim] timed out", {
+                  runId,
+                  timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
+                  elapsedMs: Date.now() - startedAtMs,
+                });
+                return;
+              }
+              const claimSummary = outcome.summary;
+              if (claimSummary.reason !== "no redeemable condition ids") {
+                log("[auto-claim] result", claimSummary);
+              }
+            })
+            .catch((err) => {
+              log("[auto-claim] error", err instanceof Error ? err.message : err);
+            })
+            .finally(() => {
+              if (runId === autoClaimRunSeq) {
+                autoClaimInFlight = false;
+              }
+            });
+        }
       }
     } catch (err) {
       log("main loop error", err instanceof Error ? err.message : err);
