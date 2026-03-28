@@ -240,12 +240,16 @@ function summarizeTrades(trades: LiveTradeRecord[]): {
     else m.no += filled;
 
     if (t.resolved) {
-      const matched = t.matchedSize || 0;
-      const price = t.entryPrice || 0;
-      if (t.win) {
-        totalPnL += (matched * (1.0 - price));
+      if (t.officialPnlUsd != null) {
+        totalPnL += t.officialPnlUsd;
       } else {
-        totalPnL -= (matched * price);
+         const matched = t.matchedSize || 0;
+         const price = t.entryPrice || 0;
+         if (t.win) {
+           totalPnL += (matched * (1.0 - price));
+         } else {
+           totalPnL -= (matched * price);
+         }
       }
     }
   }
@@ -710,6 +714,79 @@ const server = http.createServer(async (req, res) => {
       if ((method === "POST" || method === "DELETE") && pathname === "/api/trades/clear") {
         stateStore.clearTrades(true);
         sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/api/trades/by-coin") {
+        const state = stateStore.load();
+        const trades = state.trades || [];
+        const coins = new Map<string, any>();
+        
+        for (const t of trades) {
+          const coin = String(t.coin || "UNKNOWN").toUpperCase();
+          if (!coins.has(coin)) {
+             coins.set(coin, { coin, markets: new Map<string, any>() });
+          }
+          const cm = coins.get(coin).markets;
+          if (!cm.has(t.marketId)) {
+             cm.set(t.marketId, {
+                marketId: t.marketId,
+                title: t.marketTitle || t.targetId || "Unknown Market",
+                entryTime: t.entryTime,
+                settleTime: t.settleTime,
+                trades: []
+             });
+          }
+          cm.get(t.marketId).trades.push(t);
+        }
+
+        const result = Array.from(coins.values()).map(c => {
+          c.markets = Array.from(c.markets.values()).map((m: any) => {
+             m.trades.sort((a: any, b: any) => Date.parse(a.entryTime) - Date.parse(b.entryTime));
+             let totalPlanned = 0;
+             let totalMatched = 0;
+             let totalNotional = 0;
+             let totalPnl = 0;
+             
+             let hasYes = false;
+             let hasNo = false;
+
+             for (const t of m.trades) {
+               totalPlanned += toNumber(t.orderPlanShareSize);
+               const matched = toNumber(t.matchedSize);
+               totalMatched += matched;
+               totalNotional += matched * toNumber(t.entryPrice);
+               
+               if (t.side === "YES" && matched > 0) hasYes = true;
+               if (t.side === "NO" && matched > 0) hasNo = true;
+
+               if (t.resolved) {
+                 if (t.officialPnlUsd != null) {
+                   totalPnl += t.officialPnlUsd;
+                 } else {
+                   totalPnl += t.win ? (matched * (1.0 - toNumber(t.entryPrice))) : -(matched * toNumber(t.entryPrice));
+                 }
+               }
+             }
+
+             return {
+               ...m,
+               totalPlanned,
+               totalMatched,
+               totalNotional,
+               totalPnl,
+               isFullPair: hasYes && hasNo,
+               fillRate: totalPlanned > 0 ? (totalMatched / totalPlanned) : 0
+             };
+          }).sort((a: any, b: any) => Date.parse(b.entryTime) - Date.parse(a.entryTime));
+          
+          c.totalPnl = c.markets.reduce((acc: number, m: any) => acc + m.totalPnl, 0);
+          c.totalMatched = c.markets.reduce((acc: number, m: any) => acc + m.totalMatched, 0);
+          c.totalNotional = c.markets.reduce((acc: number, m: any) => acc + m.totalNotional, 0);
+          return c;
+        });
+
+        sendJson(res, 200, { coins: result });
         return;
       }
 

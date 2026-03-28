@@ -862,6 +862,17 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   const targetAnalysisLocks = new Map<string, number>();
   let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
+  try {
+    const claimFile = path.resolve("state", "last_claim.txt");
+    lastAutoClaimAtMs = Number(fs.readFileSync(claimFile, "utf8").trim());
+    if (!Number.isFinite(lastAutoClaimAtMs) || lastAutoClaimAtMs <= 0) {
+      lastAutoClaimAtMs = Date.now();
+      try { fs.writeFileSync(claimFile, String(lastAutoClaimAtMs), "utf8"); } catch {}
+    }
+  } catch {
+    lastAutoClaimAtMs = Date.now(); // 默认记录当前时间，避免启动立即触发
+    try { fs.writeFileSync(path.resolve("state", "last_claim.txt"), String(lastAutoClaimAtMs), "utf8"); } catch {}
+  }
   let autoClaimInFlight = false;
   let autoClaimRunSeq = 0;
   let cancelStaleInFlight = false;
@@ -1040,6 +1051,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
           const runId = ++autoClaimRunSeq;
           autoClaimInFlight = true;
           lastAutoClaimAtMs = nowMs;
+          try { fs.writeFileSync(path.resolve("state", "last_claim.txt"), String(nowMs), "utf8"); } catch {}
           const cfgForClaim = cfg;
           const startedAtMs = Date.now();
           logInfo("started", { runId, timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS }, "auto-claim");
