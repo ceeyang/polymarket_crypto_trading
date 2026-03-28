@@ -694,6 +694,7 @@
             <div class="muted">支持 5 分钟、15 分钟和 1 小时盘口；每个盘口周期内同时挂 YES / NO 双边单，到期自动撤未成交余单。</div>
           </div>
           <div class="row">
+            <span class="pill" id="versionPill" title="版本号 / Git Commit / 进程启动时间">v--</span>
             <span class="pill" id="modePill">运行模式读取中...</span>
             <span class="pill" id="balanceInfo">余额读取中...</span>
             <button class="secondary hidden" id="logoutBtn" type="button">退出登录</button>
@@ -741,9 +742,7 @@
             <h2>运行参数</h2>
             <div class="grid-2" style="margin-top: 12px;">
               <label class="toggle"><input id="dryRun" type="checkbox" />模拟模式 dry-run</label>
-              <label class="toggle"><input id="autoClaim" type="checkbox" />自动赎回</label>
               <div class="field"><label for="pollIntervalSec">轮询间隔(秒)</label><input id="pollIntervalSec" type="number" min="5" step="1" /></div>
-              <div class="field"><label for="claimIntervalSec">赎回间隔(秒)</label><input id="claimIntervalSec" type="number" min="30" step="1" /></div>
             </div>
           </div>
 
@@ -811,7 +810,7 @@
           <div class="muted" style="margin-top: 8px;">
             当前版本只做固定双边挂单，不再做 AI 判断、趋势判断或额外风控拦截。
             Bot 会在每个 5m / 15m / 1h 盘口的当前周期内，只对每个目标执行一次双边挂单：
-            YES 与 NO 会按当前配置的价格与份数挂单；盘口结束后自动撤销未成交余单，并按设定间隔自动赎回收益。
+            YES 与 NO 会按当前配置的价格与份数挂单；盘口结束后自动撤销未成交余单，空闲时自动赎回可领取的收益。
           </div>
         </div>
       </section>
@@ -953,6 +952,7 @@
       const cfgStatus = document.getElementById("cfgStatus");
       const balanceInfo = document.getElementById("balanceInfo");
       const modePill = document.getElementById("modePill");
+      const versionPill = document.getElementById("versionPill");
       const logoutBtn = document.getElementById("logoutBtn");
       const scanDot = document.getElementById("scanDot");
       const scanTitle = document.getElementById("scanTitle");
@@ -1358,10 +1358,8 @@
 
       function fillForm(cfg) {
         setValue("pollIntervalSec", cfg.runtime.pollIntervalSec);
-        setValue("claimIntervalSec", cfg.runtime.claimIntervalSec ?? 300);
         renderOrderEntries(getConfigOrderEntries(cfg));
         document.getElementById("dryRun").checked = Boolean(cfg.runtime.dryRun);
-        document.getElementById("autoClaim").checked = Boolean(cfg.runtime.autoClaim);
         renderTargets(cfg.strategy.targets || []);
         renderTradeTargets(cfg.strategy.targets || []);
         modePill.textContent = cfg.runtime.dryRun ? "当前配置: DRY_RUN" : "当前配置: LIVE";
@@ -1380,9 +1378,7 @@
       function readFormToConfig() {
         const next = JSON.parse(JSON.stringify(fullConfig));
         next.runtime.dryRun = document.getElementById("dryRun").checked;
-        next.runtime.autoClaim = document.getElementById("autoClaim").checked;
         next.runtime.pollIntervalSec = Math.max(5, Math.round(num("pollIntervalSec", next.runtime.pollIntervalSec || 20)));
-        next.runtime.claimIntervalSec = Math.max(30, Math.round(num("claimIntervalSec", next.runtime.claimIntervalSec || 300)));
         next.strategy.orderEntries = readRenderedOrderEntries();
         delete next.strategy.fixedOrderPrice;
         delete next.strategy.orderShareSize;
@@ -1507,6 +1503,21 @@
           balanceInfo.textContent = formatAccountText(data);
         } catch (err) {
           balanceInfo.textContent = `余额读取失败: ${String(err)}`;
+        }
+      }
+
+      async function loadVersion() {
+        try {
+          const resp = await apiFetch("/api/version");
+          if (!resp.ok) return;
+          const data = await resp.json();
+          const ver = data.version ?? "?";
+          const commit = data.commit ?? "?";
+          const startedAt = data.startedAt ? new Date(data.startedAt).toLocaleString() : "?";
+          versionPill.textContent = `v${ver} (${commit})`;
+          versionPill.title = `版本: ${ver} | Commit: ${commit} | 进程启动: ${startedAt}`;
+        } catch {
+          versionPill.textContent = "v?";
         }
       }
 
@@ -1680,6 +1691,7 @@
       (async () => {
         setActiveTab(activeTab);
         await loadAuthSession();
+        await loadVersion();
         await loadConfig();
         await loadTrades();
         await loadPredictions();

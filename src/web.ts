@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import { execSync } from "node:child_process";
 import { URL, fileURLToPath } from "node:url";
 import axios from "axios";
 import { Wallet } from "ethers";
@@ -31,6 +32,30 @@ let accountCache: { ts: number; data: Awaited<ReturnType<typeof fetchAccountSumm
 const marketUrlCache = new Map<string, { ts: number; url: string }>();
 const MARKET_URL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const authSessions = new Map<string, number>();
+
+// ── 版本信息（进程启动时一次性读取）───────────────────────────────────
+function readAppVersion(): { version: string; commit: string; startedAt: string } {
+  let version = "unknown";
+  try {
+    const pkgPath = path.resolve("package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { version?: string };
+    if (typeof pkg.version === "string") version = pkg.version;
+  } catch {
+    // ignore
+  }
+
+  let commit = "unknown";
+  try {
+    commit = execSync("git rev-parse --short HEAD", { encoding: "utf8", timeout: 3000 }).trim();
+  } catch {
+    // ignore — no git or not a repo
+  }
+
+  return { version, commit, startedAt: new Date().toISOString() };
+}
+
+const APP_VERSION = readAppVersion();
+// ─────────────────────────────────────────────────────────────────────
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   res.statusCode = status;
@@ -472,6 +497,11 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
 
       if (pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/")) {
         if (!requireWebAuth(req, res, true)) return;
+      }
+
+      if (method === "GET" && pathname === "/api/version") {
+        sendJson(res, 200, APP_VERSION);
+        return;
       }
 
       if (method === "GET" && pathname === "/api/bot/control") {
