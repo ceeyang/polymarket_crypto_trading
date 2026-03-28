@@ -194,7 +194,12 @@ async function findExistingRedeemTransaction(
   return pickLatestTransaction(related);
 }
 
-async function pickWorkingRpcUrl(rpcUrls: string[], chainId: number, logPrefix: string): Promise<string> {
+async function pickWorkingRpcUrl(
+  rpcUrls: string[],
+  chainId: number,
+  logPrefix: string,
+  logger?: (msg: string, obj?: unknown) => void,
+): Promise<string> {
   const tried: Array<{ url: string; error: string }> = [];
 
   for (const url of rpcUrls) {
@@ -204,11 +209,19 @@ async function pickWorkingRpcUrl(rpcUrls: string[], chainId: number, logPrefix: 
     );
     try {
       await provider.getBlockNumber();
-      log(logPrefix, "rpc connected", { rpcUrl: url });
+      if (logger) {
+        logger("rpc connected", { rpcUrl: url });
+      } else {
+        log(logPrefix, "rpc connected", { rpcUrl: url });
+      }
       return url;
     } catch (err) {
       tried.push({ url, error: getErrorMessage(err) });
-      log(logPrefix, "rpc failed", { rpcUrl: url, error: tried[tried.length - 1].error });
+      if (logger) {
+        logger("rpc failed", { rpcUrl: url, error: tried[tried.length - 1].error });
+      } else {
+        log(logPrefix, "rpc failed", { rpcUrl: url, error: tried[tried.length - 1].error });
+      }
     }
   }
 
@@ -269,16 +282,17 @@ async function executeRedeem(
   tx: Transaction,
   conditionId: string,
   logPrefix: string,
+  logger: (msg: string, obj?: unknown, level?: string) => void,
 ): Promise<void> {
   const metadata = `ctf redeem ${conditionId}`;
-  log(logPrefix, "preparing redeem transaction", { conditionId, txType });
+  logger("preparing redeem transaction", { conditionId, txType });
 
   try {
     const existing = await findExistingRedeemTransaction(client, metadata);
     if (existing) {
       const state = String(existing.state || "");
       if (RELAYER_SUCCESS_STATES.has(state)) {
-        log(logPrefix, "reuse existing redeemed tx", {
+        logger("reuse existing redeemed tx", {
           conditionId,
           transactionID: existing.transactionID,
           state,
@@ -287,7 +301,7 @@ async function executeRedeem(
         return;
       }
       if (!RELAYER_FAILED_STATES.has(state)) {
-        log(logPrefix, "reuse existing pending tx", {
+        logger("reuse existing pending tx", {
           conditionId,
           transactionID: existing.transactionID,
           state,
@@ -298,7 +312,7 @@ async function executeRedeem(
       }
     }
   } catch (err) {
-    log(logPrefix, "existing transaction lookup failed", {
+    logger("existing transaction lookup failed", {
       conditionId,
       error: getErrorMessage(err),
     });
@@ -306,29 +320,30 @@ async function executeRedeem(
 
   let response;
   try {
+    logger("asynchronously requesting relayer execute...", { conditionId });
     response = await client.execute([tx], metadata);
   } catch (err) {
     const message = getErrorMessage(err);
     if (txType === RelayerTxType.SAFE && /safe not deployed/i.test(message)) {
-      log(logPrefix, "safe not deployed; deploying now");
+      logger("safe not deployed; deploying now");
       const deployResp = await client.deploy();
       const deployResult = await deployResp.wait();
       if (!deployResult) {
         throw new Error("Safe deploy failed or timed out");
       }
-      log(logPrefix, "safe deployed", {
+      logger("safe deployed", {
         transactionID: deployResult.transactionID,
         txHash: deployResult.transactionHash,
         safe: deployResult.proxyAddress,
       });
-      log(logPrefix, "resending original redeem transaction");
+      logger("resending original redeem transaction");
       response = await client.execute([tx], metadata);
     } else {
       throw err;
     }
   }
 
-  log(logPrefix, "submitted to relayer", {
+  logger("submitted to relayer", {
     conditionId,
     transactionID: response.transactionID,
     state: response.state,
@@ -338,17 +353,17 @@ async function executeRedeem(
   try {
     const finalTx = await response.wait();
     if (finalTx) {
-      log(logPrefix, "confirmed", {
+      logger("confirmed", {
         conditionId,
         txHash: finalTx.transactionHash,
         state: finalTx.state,
-      });
+      }, "success");
     }
   } catch (err) {
-    log(logPrefix, "confirmation check failed", {
+    logger("confirmation check failed", {
       conditionId,
       error: getErrorMessage(err),
-    });
+    }, "warn");
   }
 
   const result = await waitForTransactionState(client, response.transactionID, conditionId, logPrefix);
@@ -459,13 +474,13 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   }
 
   if (cfg.funderAddress && cfg.funderAddress.toLowerCase() !== signer.address.toLowerCase()) {
-    log(logPrefix, "info: FUNDER_ADDRESS differs from signer address; relayer flow will target signer's proxy/safe path", {
+    claimLog("info: FUNDER_ADDRESS differs from signer address; relayer flow will target signer's proxy/safe path", {
       signer: signer.address,
       funder: cfg.funderAddress,
     });
   }
 
-  log(logPrefix, "targets", {
+  claimLog("targets", {
     user,
     conditions: totalConditions,
     dryRun: effectiveDryRun,
@@ -477,7 +492,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   });
 
   if (effectiveDryRun) {
-    log(logPrefix, "dry-run conditionIds", conditionIds);
+    claimLog("dry-run conditionIds", conditionIds);
     return {
       user,
       redeemablePositions: redeemable.length,
@@ -489,12 +504,12 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     };
   }
 
-  const rpcUrl = await pickWorkingRpcUrl(cfg.rpcUrls, cfg.chainId, logPrefix);
+  const rpcUrl = await pickWorkingRpcUrl(cfg.rpcUrls, cfg.chainId, logPrefix, (m, o) => claimLog(m, o));
   const { client, txType } = createRelayClient(cfg, privateKey, rpcUrl);
   const effectiveConcurrency = txType === RelayerTxType.SAFE ? 1 : maxConcurrency;
 
   if (effectiveConcurrency !== maxConcurrency) {
-    log(logPrefix, "override concurrency for SAFE relayer", {
+    claimLog("override concurrency for SAFE relayer", {
       requested: maxConcurrency,
       effective: effectiveConcurrency,
       reason: "safe transactions must use sequential nonces",
@@ -509,14 +524,14 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
       if (!conditionId) return;
       try {
         const tx = createCtfRedeemTransaction(cfg, conditionId as Hex);
-        await executeRedeem(client, txType, tx, conditionId, logPrefix);
+        await executeRedeem(client, txType, tx, conditionId, logPrefix, (m, o, l) => claimLog(m, o, l));
         success += 1;
       } catch (err) {
         failed += 1;
-        log(logPrefix, "failed", {
+        claimLog("failed", {
           conditionId,
           error: getErrorMessage(err),
-        });
+        }, "error");
       }
     }
   };
