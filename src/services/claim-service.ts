@@ -103,9 +103,23 @@ function extractClaimableUsd(position: any): number {
     position?.claimableAmount,
     position?.redeemable_usd,
     position?.total_payout_usd,
+    position?.payout_usd,
+    position?.payoutValue,
+    position?.payout_value,
+    position?.payout,
+    position?.currentValue,
+    position?.current_value,
+    position?.curValue,
+    position?.value,
+    position?.usdValue,
+    position?.usdcValue,
+    position?.finalValue,
+    position?.final_value,
+    position?.cashPnl,
+    position?.cash_pnl,
   ]
     .map((x) => asNumber(x))
-    .filter((x) => x >= 0);
+    .filter((x) => x > 0);
 
   if (!candidates.length) return 0;
   return Math.max(...candidates);
@@ -358,6 +372,22 @@ async function executeRedeem(
     txHash: response.transactionHash,
   });
 
+  try {
+    const finalTx = await response.wait();
+    if (finalTx) {
+      log(logPrefix, "confirmed", {
+        conditionId,
+        txHash: finalTx.transactionHash,
+        state: finalTx.state,
+      });
+    }
+  } catch (err) {
+    log(logPrefix, "confirmation check failed", {
+      conditionId,
+      error: getErrorMessage(err),
+    });
+  }
+
   const result = await waitForTransactionState(client, response.transactionID, conditionId, logPrefix);
 
   log(logPrefix, "redeemed", {
@@ -411,30 +441,48 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     if (isRedeemable && size > 0) return true;
 
     // 增加详细诊断日志，仅在有 redeemable 标记但过滤失败时
-    if (isRedeemable && (size <= 0 || usd <= 0)) {
+    if (isRedeemable && size <= 0) {
       claimLog("position skipped", {
         conditionId: p?.conditionId || p?.condition_id,
         size,
         usd,
-        reason: size <= 0 ? "size <= 0" : "usd <= 0"
+        reason: "size <= 0"
       }, "warn");
     }
     return false;
   });
 
+  claimLog("filter results", {
+    rawCount: positions.length,
+    redeemableCount: redeemable.length,
+  });
+
   const whitelist = new Set((options?.conditionIds ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean));
+  const actionablePositions = redeemable.filter((p: any) => {
+    const cid = normalizeConditionId(p?.conditionId ?? p?.condition_id);
+    if (!cid) return false;
+    if (whitelist.size && !whitelist.has(cid.toLowerCase())) return false;
+    const usd = extractClaimableUsd(p);
+    if (usd <= 0) {
+       // 虽然 redeemable 但价值为 0（大概率是个 loser token）
+       return false;
+    }
+    return true;
+  });
+
   const conditionIds = Array.from(new Set(
-    redeemable
-      .map((p: any) => normalizeConditionId(p?.conditionId ?? p?.condition_id))
-      .filter((x: string | null): x is string => Boolean(x))
-      .filter((x: string) => (whitelist.size ? whitelist.has(x.toLowerCase()) : true)),
+    actionablePositions.map((p: any) => normalizeConditionId(p?.conditionId ?? p?.condition_id)!)
   ));
+
   const totalConditions = conditionIds.length;
+  claimLog("selection summary", {
+    raw: positions.length,
+    redeemable: redeemable.length,
+    actionable: totalConditions,
+    whitelistActive: whitelist.size > 0
+  });
 
   if (totalConditions === 0) {
-    if (!quietNoop) {
-      claimLog("no redeemable condition ids found", { user, redeemablePositions: redeemable.length });
-    }
     return {
       user,
       redeemablePositions: redeemable.length,
@@ -442,7 +490,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
       success: 0,
       failed: 0,
       dryRun: effectiveDryRun,
-      reason: "no redeemable condition ids",
+      reason: "no actionable winning positions",
     };
   }
 
