@@ -1297,8 +1297,8 @@
       tiersSection.innerHTML = `<h3 style="margin:20px 18px 10px; font-size:16px;">📊 各盘口挂单深度成功率 (只显示有历史痕迹的层级)</h3>`;
       
       const grid = document.createElement("div");
-      grid.style.display = "grid";
-      grid.style.gridTemplateColumns = "repeat(auto-fill, minmax(360px, 1fr))";
+      grid.style.display = "flex";
+      grid.style.flexDirection = "column";
       grid.style.gap = "16px";
       grid.style.padding = "0 18px";
       
@@ -1324,14 +1324,38 @@
            `;
         }
         
+        const targetYieldPct = tg.totalCost > 0 ? (tg.totalPnl / tg.totalCost * 100).toFixed(2) : "0.00";
+        const targetFillRate = tg.totalPlanned > 0 ? (tg.totalMatched / tg.totalPlanned * 100).toFixed(2) : "0.00";
+        const targetPnlColor = tg.totalPnl >= 0 ? 'var(--success)' : 'var(--danger)';
+        const targetPnlBg = tg.totalPnl >= 0 ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
+        const targetPnlBorder = tg.totalPnl >= 0 ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)';
+
         tgCard.innerHTML = `
-          <div style="background: rgba(15,118,110,0.06); padding:10px 14px; font-weight:600; border-bottom:1px solid var(--border);">
-             盘口目标: ${escapeHtml(tg.targetId)}
+          <div style="background: rgba(15,118,110,0.04); padding:14px 18px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+             <div style="font-weight:700; font-size:15px; color:var(--text);"><span style="margin-right:6px;">🎯</span>盘口: <span style="font-family:monospace; margin-left:4px;">${escapeHtml(tg.targetId)}</span></div>
+             <div style="font-size:13px; font-weight:600; display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+                <div>
+                   <span style="color:var(--muted); margin-right:4px;">总体被插针率:</span> 
+                   <span>${targetFillRate}%</span>
+                </div>
+                <div>
+                   <span style="color:var(--muted); margin-right:4px;">标的投资回报率 (ROI):</span>
+                   <span style="color:${targetPnlColor}; background:${targetPnlBg}; padding:3px 8px; border-radius:6px; border:1px solid ${targetPnlBorder};">
+                      ${tg.totalPnl >= 0 ? '+' : ''}${targetYieldPct}%
+                   </span>
+                </div>
+                <div>
+                   <span style="color:var(--muted); margin-right:4px;">累计总净利:</span>
+                   <span style="color:${targetPnlColor}; font-weight:700;">
+                      ${tg.totalPnl >= 0 ? '+' : ''}${fmtNumber(tg.totalPnl, 4)} USDC
+                   </span>
+                </div>
+             </div>
           </div>
           <table style="width:100%; text-align:left; font-size:13px; border-collapse:collapse;">
              <thead>
                <tr style="border-bottom: 2px solid var(--border);">
-                 <th style="padding:8px 10px; color:var(--muted)">单前水位</th>
+                 <th style="padding:8px 18px; color:var(--muted)">单前水位</th>
                  <th style="padding:8px 10px; color:var(--muted)">实吃股数/计划</th>
                  <th style="padding:8px 10px; color:var(--muted)">打针成交率</th>
                  <th style="padding:8px 10px; color:var(--muted)">层级净盈亏</th>

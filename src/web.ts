@@ -789,9 +789,11 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
           const target = String(t.targetId || "UNKNOWN_TARGET");
           let tg = targetsMap.get(target);
           if (!tg) {
-             tg = { targetId: target, tiers: new Map<string, any>() };
+             tg = { targetId: target, tiers: new Map<string, any>(), totalPlanned: 0, totalMatched: 0, totalCost: 0, totalPnl: 0 };
              targetsMap.set(target, tg);
           }
+          tg.totalPlanned += toNumber(t.orderPlanShareSize);
+          tg.totalMatched += matched;
           const priceKey = toNumber(t.orderPlanPrice).toFixed(3);
           let tier = tg.tiers.get(priceKey);
           if (!tier) {
@@ -851,8 +853,15 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
            }
 
            // Record global sums regardless of resolution to reflect real-time overhead and captures
+           const marketPnl = m.resolved ? m.totalPnl : (m.isDoubleFill ? m.expectedPnl : 0);
            sumTotalMatched += m.totalNotional;
-           sumTotalPnl += m.resolved ? m.totalPnl : (m.isDoubleFill ? m.expectedPnl : 0);
+           sumTotalPnl += marketPnl;
+
+           const tg = targetsMap.get(m.targetId);
+           if (tg) {
+               tg.totalCost += m.totalNotional;
+               tg.totalPnl += marketPnl;
+           }
 
            if (m.isDoubleFill) sumDoubleFills++;
            else if (m.totalMatched > 0) sumSingleFills++;
@@ -867,6 +876,10 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         const targetData = Array.from(targetsMap.values()).map(tg => {
            return {
               targetId: tg.targetId,
+              totalPlanned: tg.totalPlanned,
+              totalMatched: tg.totalMatched,
+              totalCost: tg.totalCost,
+              totalPnl: tg.totalPnl,
               tiers: Array.from(tg.tiers.values()).sort((a: any, b: any) => b.price - a.price)
            };
         });
