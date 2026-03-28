@@ -229,7 +229,7 @@ function normalizeRuntimeConfigFile(input: RuntimeConfigFile): RuntimeConfigFile
       dryRun: input.runtime?.dryRun !== false,
       pollIntervalSec: parsePositiveInt(input.runtime?.pollIntervalSec, 20),
       autoClaim: input.runtime?.autoClaim !== false,
-      claimIntervalSec: parsePositiveInt(input.runtime?.claimIntervalSec, 300),
+      claimIntervalSec: parsePositiveInt(input.runtime?.claimIntervalSec, 1800),
     },
     strategy: {
       orderEntries: normalizeOrderEntries(input.strategy?.orderEntries, input.strategy?.fixedOrderPrice, input.strategy?.orderShareSize),

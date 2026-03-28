@@ -3,7 +3,7 @@
     "dryRun": false,
     "pollIntervalSec": 20,
     "autoClaim": true,
-    "claimIntervalSec": 300
+    "claimIntervalSec": 50000
   },
   "strategy": {
     "orderEntries": [

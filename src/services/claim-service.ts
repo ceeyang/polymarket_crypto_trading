@@ -276,52 +276,21 @@ function createCtfRedeemTransaction(cfg: Config, conditionId: Hex): Transaction 
   };
 }
 
-async function executeRedeem(
+async function executeBatchRedeem(
   client: RelayClient,
   txType: RelayerTxType,
-  tx: Transaction,
-  conditionId: string,
+  txs: Transaction[],
+  conditionIds: string[],
   logPrefix: string,
   logger: (msg: string, obj?: unknown, level?: string) => void,
 ): Promise<void> {
-  const metadata = `ctf redeem ${conditionId}`;
-  logger("preparing redeem transaction", { conditionId, txType });
-
-  try {
-    const existing = await findExistingRedeemTransaction(client, metadata);
-    if (existing) {
-      const state = String(existing.state || "");
-      if (RELAYER_SUCCESS_STATES.has(state)) {
-        logger("reuse existing redeemed tx", {
-          conditionId,
-          transactionID: existing.transactionID,
-          state,
-          txHash: existing.transactionHash,
-        });
-        return;
-      }
-      if (!RELAYER_FAILED_STATES.has(state)) {
-        logger("reuse existing pending tx", {
-          conditionId,
-          transactionID: existing.transactionID,
-          state,
-          txHash: existing.transactionHash,
-        });
-        await waitForTransactionState(client, existing.transactionID, conditionId, logPrefix);
-        return;
-      }
-    }
-  } catch (err) {
-    logger("existing transaction lookup failed", {
-      conditionId,
-      error: getErrorMessage(err),
-    });
-  }
+  const metadata = `ctf batch redeem ${conditionIds.length} ids`;
+  logger("preparing batch redeem transaction", { count: conditionIds.length, txType });
 
   let response;
   try {
-    logger("asynchronously requesting relayer execute...", { conditionId });
-    response = await client.execute([tx], metadata);
+    logger("asynchronously requesting relayer batch execute...", { conditionIds });
+    response = await client.execute(txs, metadata);
   } catch (err) {
     const message = getErrorMessage(err);
     if (txType === RelayerTxType.SAFE && /safe not deployed/i.test(message)) {
@@ -336,44 +305,36 @@ async function executeRedeem(
         txHash: deployResult.transactionHash,
         safe: deployResult.proxyAddress,
       });
-      logger("resending original redeem transaction");
-      response = await client.execute([tx], metadata);
+      logger("resending original batch redeem transaction");
+      response = await client.execute(txs, metadata);
     } else {
       throw err;
     }
   }
 
   logger("submitted to relayer", {
-    conditionId,
     transactionID: response.transactionID,
     state: response.state,
     txHash: response.transactionHash,
+    batchSize: conditionIds.length,
   });
 
   try {
     const finalTx = await response.wait();
     if (finalTx) {
       logger("confirmed", {
-        conditionId,
         txHash: finalTx.transactionHash,
         state: finalTx.state,
+        batchSize: conditionIds.length,
       }, "success");
     }
   } catch (err) {
     logger("confirmation check failed", {
-      conditionId,
       error: getErrorMessage(err),
     }, "warn");
   }
 
-  const result = await waitForTransactionState(client, response.transactionID, conditionId, logPrefix);
-
-  log(logPrefix, "redeemed", {
-    conditionId,
-    transactionID: result.transactionID,
-    txHash: result.transactionHash,
-    state: result.state,
-  });
+  await waitForTransactionState(client, response.transactionID, "batch", logPrefix);
 }
 
 export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOptions): Promise<ClaimRunSummary> {
@@ -419,7 +380,6 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
     if (isRedeemable && size > 0 && curPrice > 0) return true;
 
-    // 增加详细诊断日志，仅在有 redeemable 标记但过滤失败时
     if (isRedeemable && size <= 0) {
       claimLog("position skipped", {
         conditionId: p?.conditionId,
@@ -443,7 +403,6 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     if (whitelist.size && !whitelist.has(cid.toLowerCase())) return false;
     const usd = extractClaimableUsd(p);
     if (usd <= 0) {
-      // 虽然 redeemable 但价值为 0（大概率是个 loser token）
       return false;
     }
     return true;
@@ -506,51 +465,40 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   const rpcUrl = await pickWorkingRpcUrl(cfg.rpcUrls, cfg.chainId, logPrefix, (m, o) => claimLog(m, o));
   const { client, txType } = createRelayClient(cfg, privateKey, rpcUrl);
-  const effectiveConcurrency = txType === RelayerTxType.SAFE ? 1 : maxConcurrency;
-
-  if (effectiveConcurrency !== maxConcurrency) {
-    claimLog("override concurrency for SAFE relayer", {
-      requested: maxConcurrency,
-      effective: effectiveConcurrency,
-      reason: "safe transactions must use sequential nonces",
-    });
-  }
 
   let success = 0;
   let failed = 0;
-  const worker = async (): Promise<void> => {
-    while (true) {
-      const conditionId = conditionIds.shift();
-      if (!conditionId) return;
-      try {
-        const tx = createCtfRedeemTransaction(cfg, conditionId as Hex);
-        await executeRedeem(client, txType, tx, conditionId, logPrefix, (m, o, l) => claimLog(m, o, l));
-        success += 1;
-      } catch (err) {
-        failed += 1;
-        claimLog("failed", {
-          conditionId,
-          error: getErrorMessage(err),
-        }, "error");
-      }
-    }
-  };
 
-  if (effectiveConcurrency <= 1 || conditionIds.length <= 1) {
-    await worker();
-  } else {
-    const workers = Math.min(effectiveConcurrency, conditionIds.length);
-    await Promise.all(Array.from({ length: workers }, async () => worker()));
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < conditionIds.length; i += BATCH_SIZE) {
+    const batchIds = conditionIds.slice(i, i + BATCH_SIZE);
+    try {
+      const txs = batchIds.map((cid) => createCtfRedeemTransaction(cfg, cid as Hex));
+      await executeBatchRedeem(client, txType, txs, batchIds, logPrefix, (m, o, l) => claimLog(m, o, l));
+      success += batchIds.length;
+    } catch (err) {
+      failed += batchIds.length;
+      claimLog("batch redeem failed", {
+        ids: batchIds,
+        error: getErrorMessage(err),
+      }, "error");
+    }
   }
 
-  const summary: ClaimRunSummary = {
+  claimLog("finish", {
+    user,
+    total: totalConditions,
+    success,
+    failed,
+    dryRun: false,
+  });
+
+  return {
     user,
     redeemablePositions: redeemable.length,
     conditions: totalConditions,
     success,
     failed,
-    dryRun: effectiveDryRun,
+    dryRun: false,
   };
-  log(logPrefix, "summary", summary);
-  return summary;
 }

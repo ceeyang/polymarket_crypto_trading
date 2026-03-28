@@ -790,8 +790,11 @@
           <h2>运行参数</h2>
           <div class="grid-2" style="margin-top: 12px;">
             <label class="toggle"><input id="dryRun" type="checkbox" />模拟模式 dry-run</label>
+            <label class="toggle"><input id="autoClaim" type="checkbox" />自动领取收益</label>
             <div class="field"><label for="pollIntervalSec">轮询间隔(秒)</label><input id="pollIntervalSec" type="number"
                 min="5" step="1" /></div>
+            <div class="field"><label for="claimIntervalSec">收益提取间隔(秒)</label><input id="claimIntervalSec" type="number"
+                min="60" step="10" /></div>
           </div>
         </div>
 
@@ -1409,8 +1412,10 @@
 
     function fillForm(cfg) {
       setValue("pollIntervalSec", cfg.runtime.pollIntervalSec);
+      setValue("claimIntervalSec", cfg.runtime.claimIntervalSec || 1800);
       renderOrderEntries(getConfigOrderEntries(cfg));
       document.getElementById("dryRun").checked = Boolean(cfg.runtime.dryRun);
+      document.getElementById("autoClaim").checked = Boolean(cfg.runtime.autoClaim);
       renderTargets(cfg.strategy.targets || []);
       renderTradeTargets(cfg.strategy.targets || []);
       modePill.textContent = cfg.runtime.dryRun ? "当前配置: DRY_RUN" : "当前配置: LIVE";
@@ -1429,7 +1434,9 @@
     function readFormToConfig() {
       const next = JSON.parse(JSON.stringify(fullConfig));
       next.runtime.dryRun = document.getElementById("dryRun").checked;
+      next.runtime.autoClaim = document.getElementById("autoClaim").checked;
       next.runtime.pollIntervalSec = Math.max(5, Math.round(num("pollIntervalSec", next.runtime.pollIntervalSec || 20)));
+      next.runtime.claimIntervalSec = Math.max(60, Math.round(num("claimIntervalSec", next.runtime.claimIntervalSec || 1800)));
       next.strategy.orderEntries = readRenderedOrderEntries();
       delete next.strategy.fixedOrderPrice;
       delete next.strategy.orderShareSize;
