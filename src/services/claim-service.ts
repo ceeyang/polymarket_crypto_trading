@@ -407,9 +407,8 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     const isRedeemable = Boolean(p?.redeemable);
     const size = Number(p?.size ?? p?.amount ?? 0);
     const usd = extractClaimableUsd(p);
-    claimLog("position", p);
 
-    if (isRedeemable && size > 0 && usd > 0) return true;
+    if (isRedeemable && size > 0) return true;
 
     // 增加详细诊断日志，仅在有 redeemable 标记但过滤失败时
     if (isRedeemable && (size <= 0 || usd <= 0)) {
