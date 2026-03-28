@@ -429,7 +429,25 @@ function getBotControlView(): {
 }
 
 export function startServer(port = PORT, options?: { silent?: boolean }): http.Server {
-  const server = http.createServer(async (req, res) => {
+  function formatDate(date: Date): string {
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${m}-${d} ${h}:${min}`;
+}
+
+function webLog(msg: string, obj?: unknown, tag = "web-claim", level = "info") {
+  const tsISO = new Date().toISOString();
+  const tsDisplay = formatDate(new Date());
+  const taggedMsg = `[${tag}] [${level}] ${msg}`;
+  const line = JSON.stringify({ ts: tsISO, msg: `${tsDisplay} ${taggedMsg}`, data: obj }) + "\n";
+  try {
+    fs.appendFileSync(LOG_FILE, line, "utf8");
+  } catch {}
+}
+
+const server = http.createServer(async (req, res) => {
     try {
       const method = req.method || "GET";
       const parsedUrl = new URL(req.url || "/", `http://127.0.0.1:${port}`);
@@ -562,7 +580,15 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
 
       if (method === "GET" && pathname === "/api/logs") {
         const tail = Number(parsedUrl.searchParams.get("tail") || "200");
-        const lines = tailLines(LOG_FILE, Number.isFinite(tail) ? tail : 200);
+        const rawLines = tailLines(LOG_FILE, Number.isFinite(tail) ? tail : 200);
+        const lines = rawLines.map((line) => {
+          try {
+            const parsed = JSON.parse(line);
+            return parsed.msg || line;
+          } catch {
+            return line;
+          }
+        });
         sendJson(res, 200, { lines });
         return;
       }
@@ -586,6 +612,7 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
           quietNoop: false,
           maxConcurrency: 3,
           forceLive: true,
+          logger: webLog,
         });
         accountCache = null;
         const account = await fetchAccountSummaryCached(0);

@@ -61,7 +61,7 @@
       },
       {
         "id": "SOL_5m",
-        "enabled": false,
+        "enabled": true,
         "coin": "SOL",
         "horizonMin": 5,
         "symbol": "SOLUSDT"
@@ -82,7 +82,7 @@
       },
       {
         "id": "XRP_5m",
-        "enabled": false,
+        "enabled": true,
         "coin": "XRP",
         "horizonMin": 5,
         "symbol": "XRPUSDT"

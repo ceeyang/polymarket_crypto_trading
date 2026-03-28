@@ -47,6 +47,7 @@ export interface ClaimRunOptions {
   quietNoop?: boolean;
   maxConcurrency?: number;
   forceLive?: boolean;
+  logger?: (msg: string, obj?: unknown, tag?: string, level?: string) => void;
 }
 
 export interface ClaimRunSummary {
@@ -99,6 +100,9 @@ function extractClaimableUsd(position: any): number {
     position?.usdcValue,
     position?.finalValue,
     position?.final_value,
+    position?.claimableAmount,
+    position?.redeemable_usd,
+    position?.total_payout_usd,
   ]
     .map((x) => asNumber(x))
     .filter((x) => x >= 0);
@@ -377,16 +381,40 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   const signer = new Wallet(privateKey);
   const user = cfg.funderAddress && cfg.funderAddress.trim() ? cfg.funderAddress.trim() : signer.address;
 
+  const claimLog = (msg: string, obj?: unknown, level = "info") => {
+    if (options?.logger) {
+      options.logger(msg, obj, "auto-claim", level);
+    } else {
+      log(logPrefix, msg, obj);
+    }
+  };
+
+  claimLog("fetching positions", { user });
   const { data } = await axios.get(`${cfg.dataApiHost}/positions`, {
     params: { user, size: 1000 },
     timeout: 20000,
   });
 
   const positions = Array.isArray(data) ? data : [];
+  claimLog("raw positions found", { count: positions.length });
+
   const redeemable = positions.filter((p: any) => {
-    if (!Boolean(p?.redeemable)) return false;
-    if (Number(p?.size ?? p?.amount ?? 0) <= 0) return false;
-    return extractClaimableUsd(p) > 0;
+    const isRedeemable = Boolean(p?.redeemable);
+    const size = Number(p?.size ?? p?.amount ?? 0);
+    const usd = extractClaimableUsd(p);
+    
+    if (isRedeemable && size > 0 && usd > 0) return true;
+    
+    // 增加详细诊断日志，仅在有 redeemable 标记但过滤失败时
+    if (isRedeemable && (size <= 0 || usd <= 0)) {
+      claimLog("position skipped", { 
+        conditionId: p?.conditionId || p?.condition_id,
+        size,
+        usd,
+        reason: size <= 0 ? "size <= 0" : "usd <= 0"
+      }, "warn");
+    }
+    return false;
   });
 
   const whitelist = new Set((options?.conditionIds ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean));
@@ -400,7 +428,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   if (totalConditions === 0) {
     if (!quietNoop) {
-      log(logPrefix, "no redeemable condition ids found", { user, redeemablePositions: redeemable.length });
+      claimLog("no redeemable condition ids found", { user, redeemablePositions: redeemable.length });
     }
     return {
       user,

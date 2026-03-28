@@ -66,17 +66,33 @@ function appendRuntimeLog(ts: string, msg: string, obj?: unknown): void {
   }
 }
 
-function log(msg: string, obj?: unknown) {
-  const ts = new Date().toISOString();
+function formatDate(date: Date): string {
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${m}-${d} ${h}:${min}`;
+}
+
+function log(msg: string, obj?: unknown, tag = "system", level = "info") {
+  const tsISO = new Date().toISOString();
+  const tsDisplay = formatDate(new Date());
+  const taggedMsg = `[${tag}] [${level}] ${msg}`;
+
   if (LOG_TO_STDOUT) {
     if (obj == null) {
-      console.log(`[${ts}] ${msg}`);
+      console.log(`${tsDisplay} ${taggedMsg}`);
     } else {
-      console.log(`[${ts}] ${msg}`, obj);
+      console.log(`${tsDisplay} ${taggedMsg}`, obj);
     }
   }
-  appendRuntimeLog(ts, msg, obj);
+  appendRuntimeLog(tsISO, `${tsDisplay} ${taggedMsg}`, obj);
 }
+
+function logInfo(msg: string, obj?: unknown, tag = "system") { log(msg, obj, tag, "info"); }
+function logWarn(msg: string, obj?: unknown, tag = "system") { log(msg, obj, tag, "warn"); }
+function logError(msg: string, obj?: unknown, tag = "system") { log(msg, obj, tag, "error"); }
+function logSuccess(msg: string, obj?: unknown, tag = "system") { log(msg, obj, tag, "success"); }
 
 function targetLabel(t: MarketTarget): string {
   return `${t.coin}_${t.horizonMin}m`;
@@ -582,18 +598,18 @@ async function cancelOrderBestEffort(
 ): Promise<any> {
   try {
     const resp = await trader.cancelOrder(orderId);
-    log(`[${context.label}] cancel order`, {
+    logInfo(`[${context.label}] cancel order`, {
       orderId,
       reason: context.reason,
       response: resp,
-    });
+    }, "cancel-stale");
     return resp;
   } catch (err) {
-    log(`[${context.label}] cancel order failed`, {
+    logError(`[${context.label}] cancel order failed`, {
       orderId,
       reason: context.reason,
       error: err instanceof Error ? err.message : String(err),
-    });
+    }, "cancel-stale");
     return null;
   }
 }
@@ -863,28 +879,28 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       runtime = next;
 
       if (isStartup) {
-        log(`bot started dryRun=${next.cfg.dryRun} interval=${next.cfg.pollIntervalSec}s targets=${next.activeTargets.length} controlMode=${controlMode}`);
-        log(`session started at ${sessionStartedAt}`);
+        logInfo(`bot started dryRun=${next.cfg.dryRun} interval=${next.cfg.pollIntervalSec}s targets=${next.activeTargets.length} controlMode=${controlMode}`, {}, "system");
+        logInfo(`session started at ${sessionStartedAt}`, {}, "system");
       } else {
-        log("runtime reloaded", {
+        logInfo("runtime reloaded", {
           reason,
           dryRun: next.cfg.dryRun,
           pollIntervalSec: next.cfg.pollIntervalSec,
           targets: next.activeTargets.length,
           controlMode,
-        });
+        }, "system");
       }
-      log(`auto claim enabled=${next.cfg.autoClaim} interval=${next.cfg.claimIntervalSec}s`);
-      log("active targets", next.activeTargets.map((x) => ({
+      logInfo(`auto claim enabled=${next.cfg.autoClaim} interval=${next.cfg.claimIntervalSec}s`, {}, "system");
+      logInfo("active targets", next.activeTargets.map((x) => ({
         id: x.id,
         coin: x.coin,
         horizonMin: x.horizonMin,
         symbol: resolveSymbol(x),
-      })));
+      })), "system");
       return next;
     } catch (err) {
       if (!runtime) throw err;
-      log("runtime reload failed, keep previous config", err instanceof Error ? err.message : err);
+      logError("runtime reload failed, keep previous config", err instanceof Error ? err.message : err, "system");
       return runtime;
     }
   };
@@ -925,20 +941,114 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       };
       const summaryKey = JSON.stringify(summaryPayload);
       if (summaryKey !== lastSummaryKey) {
-        log("round summary", summaryPayload);
+        logInfo("round summary", summaryPayload, "search-market");
         lastSummaryKey = summaryKey;
+      }
+
+      // ── 异步撤销过期/已结算挂单（独立 inFlight，不阻塞主循环）─────────────────
+      if (!cancelStaleInFlight && !cfg.dryRun) {
+        cancelStaleInFlight = true;
+        const cancelCfg = cfg;
+        const cancelTrader = trader;
+        void (async () => {
+          try {
+            const liveSync = await syncLiveOrdersAndCancelStale(state, cancelTrader, {
+              maxChecks: LIVE_SYNC_MAX_CHECKS,
+              cursor: liveSyncCursor,
+            });
+            liveSyncCursor = liveSync.nextCursor;
+            if (liveSync.updated > 0 || liveSync.canceled > 0 || liveSync.finalizedCanceled > 0 || liveSync.totalCandidates > LIVE_SYNC_MAX_CHECKS) {
+              logInfo("live order sync", liveSync, "cancel-stale");
+            }
+
+            const official = await settleLiveTradesWithOfficial(cancelCfg, state, 0);
+            if (official.resolved > 0) {
+              logInfo("official settlement synced", official, "settle");
+            }
+          } catch (err) {
+            logError("sync error", err instanceof Error ? err.message : err, "cancel-stale");
+          } finally {
+            cancelStaleInFlight = false;
+          }
+        })();
+      }
+
+      // dry-run 结算（同样异步，不等待）
+      void settleDryRunTradesWithOfficial(cfg, state, 0)
+        .then((dryRunOfficial) => {
+          if (dryRunOfficial.resolved > 0 || dryRunOfficial.reconciled > 0) {
+            logInfo("dry-run official settlement synced", dryRunOfficial, "settle");
+          }
+        })
+        .catch((err) => {
+          logError("dry-run settle error", err instanceof Error ? err.message : err, "settle");
+        });
+
+      // ── 异步领取可领取收益（独立 inFlight，不阻塞主循环）──────────────────────
+      if (cfg.autoClaim && !cfg.dryRun && !autoClaimInFlight) {
+        const nowMs = Date.now();
+        if (nowMs - lastAutoClaimAtMs >= cfg.claimIntervalSec * 1000) {
+          const runId = ++autoClaimRunSeq;
+          autoClaimInFlight = true;
+          lastAutoClaimAtMs = nowMs;
+          const cfgForClaim = cfg;
+          const startedAtMs = Date.now();
+          logInfo("started", { runId, timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS }, "auto-claim");
+
+          const claimPromise = claimRedeemablePositions(cfgForClaim, {
+            logPrefix: "[auto-claim]",
+            quietNoop: true,
+            maxConcurrency: 3,
+            logger: log,
+          });
+
+          // 独立监听 late error，不影响 race 结果
+          claimPromise.catch((err) => {
+            logError("late error", {
+              runId,
+              error: err instanceof Error ? err.message : err,
+            }, "auto-claim");
+          });
+
+          void Promise.race<AutoClaimRaceResult>([
+            claimPromise.then((summary) => ({ kind: "result" as const, summary })),
+            sleep(AUTO_CLAIM_MAX_RUNTIME_MS).then(() => ({ kind: "timeout" as const })),
+          ])
+            .then((outcome) => {
+              if (outcome.kind === "timeout") {
+                logWarn("timed out", {
+                  runId,
+                  timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
+                  elapsedMs: Date.now() - startedAtMs,
+                }, "auto-claim");
+                return;
+              }
+              const claimSummary = outcome.summary;
+              if (claimSummary.reason !== "no redeemable condition ids") {
+                logSuccess("result", claimSummary, "auto-claim");
+              }
+            })
+            .catch((err) => {
+              logError("error", err instanceof Error ? err.message : err, "auto-claim");
+            })
+            .finally(() => {
+              if (runId === autoClaimRunSeq) {
+                autoClaimInFlight = false;
+              }
+            });
+        }
       }
 
       const controlState = readBotControlState();
       const scanEnabled = controlMode === "STANDALONE" ? true : Boolean(controlState.scanningEnabled);
       if (scanEnabled !== lastScanEnabled) {
-        log("scan state updated", {
+        logInfo("scan state updated", {
           controlMode,
           scanningEnabled: scanEnabled,
           switchState: controlState.scanningEnabled,
           updatedAt: controlState.updatedAt,
           updatedBy: controlState.updatedBy,
-        });
+        }, "system");
         lastScanEnabled = scanEnabled;
       }
       if (!scanEnabled) {
@@ -964,18 +1074,18 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
 
           const windowCheck = isCurrentWindowByEnd(best.endDate, target.horizonMin);
           if (!windowCheck.ok) {
-            log(`[${label}] skip: not current window`, {
+            logInfo(`[${label}] skip: not current window`, {
               marketId: best.marketId,
               endDate: best.endDate,
               minsToEnd: Number.isFinite(windowCheck.minsToEnd) ? Number(windowCheck.minsToEnd.toFixed(3)) : null,
               alignDiffMs: Number.isFinite(windowCheck.alignDiffMs) ? Math.round(windowCheck.alignDiffMs) : null,
-            });
+            }, "search-market");
             return null;
           }
 
           const startInfo = cycleStartInfo(best.endDate, target.horizonMin);
           if (!startInfo) {
-            log(`[${label}] skip: invalid cycle timing`, { marketId: best.marketId, endDate: best.endDate });
+            logInfo(`[${label}] skip: invalid cycle timing`, { marketId: best.marketId, endDate: best.endDate }, "search-market");
             return null;
           }
 
@@ -986,7 +1096,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             }))
             .filter((entry) => Number.isFinite(entry.price) && entry.price > 0 && Number.isFinite(entry.shareSize) && entry.shareSize > 0);
           if (!orderEntries.length) {
-            log(`[${label}] skip: no valid order entries`, { targetId: target.id });
+            logInfo(`[${label}] skip: no valid order entries`, { targetId: target.id }, "search-market");
             return null;
           }
 
@@ -1056,7 +1166,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             cycleLockUntilMs: cycleLockExpireMs(best.endDate),
           };
         } catch (targetErr) {
-          log(`[${label}] loop error`, targetErr instanceof Error ? targetErr.message : targetErr);
+          logInfo(`[${label}] loop error`, targetErr instanceof Error ? targetErr.message : targetErr, "search-market");
           return null;
         }
       }));
@@ -1071,7 +1181,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         if (tradedMarketIds.has(evaluation.best.marketId)) continue;
 
         const { audit, best, orders } = evaluation;
-        log(`[${audit.targetId}] selected market`, {
+        logInfo(`[${audit.targetId}] selected market`, {
           marketId: best.marketId,
           conditionId: best.conditionId,
           title: best.title,
@@ -1080,7 +1190,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
           yesPrice: best.yesPrice,
           noPrice: best.noPrice,
           strategyMeta: audit.strategyMeta,
-        });
+        }, "search-market");
 
         state.markMarketAttempt(best.marketId);
         tradedMarketIds.add(best.marketId);
@@ -1094,14 +1204,14 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             negRisk: best.negRisk,
           });
 
-          log(`[${order.label}] order response`, {
+          logInfo(`[${order.label}] order response`, {
             marketId: best.marketId,
             side: order.side,
             orderPlanIndex: order.orderPlanIndex,
             price: order.limitPrice,
             shareSize: order.shareSize,
             response,
-          });
+          }, "place-order");
 
           if (response?.dryRun || cfg.dryRun) {
             state.recordTrade({
@@ -1131,10 +1241,10 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
           const orderIdRaw = response?.orderID ?? response?.orderId ?? response?.id;
           const orderId = orderIdRaw ? String(orderIdRaw) : undefined;
           if (!orderId) {
-            log(`[${order.label}] skip record: missing order id`, {
+            logError(`[${order.label}] skip record: missing order id`, {
               side: order.side,
               response,
-            });
+            }, "place-order");
             continue;
           }
 
@@ -1164,100 +1274,9 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         }
       }
 
-      // ── 异步撤销过期/已结算挂单（独立 inFlight，不阻塞主循环）─────────────────
-      if (!cancelStaleInFlight && !cfg.dryRun) {
-        cancelStaleInFlight = true;
-        const cancelCfg = cfg;
-        const cancelTrader = trader;
-        void (async () => {
-          try {
-            const liveSync = await syncLiveOrdersAndCancelStale(state, cancelTrader, {
-              maxChecks: LIVE_SYNC_MAX_CHECKS,
-              cursor: liveSyncCursor,
-            });
-            liveSyncCursor = liveSync.nextCursor;
-            if (liveSync.updated > 0 || liveSync.canceled > 0 || liveSync.finalizedCanceled > 0 || liveSync.totalCandidates > LIVE_SYNC_MAX_CHECKS) {
-              log("[cancel-stale] live order sync", liveSync);
-            }
 
-            const official = await settleLiveTradesWithOfficial(cancelCfg, state, 0);
-            if (official.resolved > 0) {
-              log("[cancel-stale] official settlement synced", official);
-            }
-          } catch (err) {
-            log("[cancel-stale] error", err instanceof Error ? err.message : err);
-          } finally {
-            cancelStaleInFlight = false;
-          }
-        })();
-      }
-
-      // dry-run 结算（同样异步，不等待）
-      void settleDryRunTradesWithOfficial(cfg, state, 0)
-        .then((dryRunOfficial) => {
-          if (dryRunOfficial.resolved > 0 || dryRunOfficial.reconciled > 0) {
-            log("dry-run official settlement synced", dryRunOfficial);
-          }
-        })
-        .catch((err) => {
-          log("dry-run settle error", err instanceof Error ? err.message : err);
-        });
-
-      // ── 异步领取可领取收益（独立 inFlight，不阻塞主循环）──────────────────────
-      if (cfg.autoClaim && !cfg.dryRun && !autoClaimInFlight) {
-        const nowMs = Date.now();
-        if (nowMs - lastAutoClaimAtMs >= cfg.claimIntervalSec * 1000) {
-          const runId = ++autoClaimRunSeq;
-          autoClaimInFlight = true;
-          lastAutoClaimAtMs = nowMs;
-          const cfgForClaim = cfg;
-          const startedAtMs = Date.now();
-          log("[auto-claim] started", { runId, timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS });
-
-          const claimPromise = claimRedeemablePositions(cfgForClaim, {
-            logPrefix: "[auto-claim]",
-            quietNoop: true,
-            maxConcurrency: 3,
-          });
-
-          // 独立监听 late error，不影响 race 结果
-          claimPromise.catch((err) => {
-            log("[auto-claim] late error", {
-              runId,
-              error: err instanceof Error ? err.message : err,
-            });
-          });
-
-          void Promise.race<AutoClaimRaceResult>([
-            claimPromise.then((summary) => ({ kind: "result" as const, summary })),
-            sleep(AUTO_CLAIM_MAX_RUNTIME_MS).then(() => ({ kind: "timeout" as const })),
-          ])
-            .then((outcome) => {
-              if (outcome.kind === "timeout") {
-                log("[auto-claim] timed out", {
-                  runId,
-                  timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS,
-                  elapsedMs: Date.now() - startedAtMs,
-                });
-                return;
-              }
-              const claimSummary = outcome.summary;
-              if (claimSummary.reason !== "no redeemable condition ids") {
-                log("[auto-claim] result", claimSummary);
-              }
-            })
-            .catch((err) => {
-              log("[auto-claim] error", err instanceof Error ? err.message : err);
-            })
-            .finally(() => {
-              if (runId === autoClaimRunSeq) {
-                autoClaimInFlight = false;
-              }
-            });
-        }
-      }
     } catch (err) {
-      log("main loop error", err instanceof Error ? err.message : err);
+      logError("main loop error", err instanceof Error ? err.message : err, "system");
     } finally {
       await sleep((runtime?.cfg.pollIntervalSec ?? 20) * 1000);
     }

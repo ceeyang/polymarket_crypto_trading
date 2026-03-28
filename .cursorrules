@@ -1,0 +1,35 @@
+# Project Rules: Polymarket Crypto Trading Bot
+
+## Logging System Rules
+
+### 1. Log Format
+The standard output and runtime log file must follow this exact format:
+`MM-DD HH:mm [function-tag] [level] message`
+
+- **Date format**: `MM-DD HH:mm` (e.g., `03-28 15:00`).
+- **Function tags**: Must be one of the following:
+    - `[auto-claim]`: Reward claiming operations.
+    - `[cancel-stale]`: Order cancellation and maintenance.
+    - `[settle]`: Settlement and reconciliation.
+    - `[search-market]`: Market scanning, selection, and auditing.
+    - `[place-order]`: Placing buy/sell orders.
+    - `[system]`: Bot startup, config reloading, and core errors.
+- **Level tags**: Must be one of the following:
+    - `[info]`: General information.
+    - `[error]`: Failures or exceptions.
+    - `[success]`: Completed beneficial actions (e.g., successful trade/claim).
+    - `[warn]`: Important warnings or timeouts.
+
+### 2. Code Implementation
+- Always use the helper functions for logging: `logInfo`, `logError`, `logSuccess`, `logWarn`.
+- The logging function `log` should accept `(msg, obj, tag, level)`.
+- **Redundancy**: The JSON storage in the log file uses `{"ts": ISO_STRING, "msg": "FORMATTED_MSG", "data": OBJ}`. The Web UI and API should typically only return the `msg` field for clean display.
+
+### 3. Web UI Log Viewer
+- The log viewer should be a simple `pre` block with plain text output.
+- Must include a text-based filter (search box) that performs case-insensitive filtering on the lines.
+- No complex color/JSON rendering should be added unless specifically requested to stay consistent with the user's preference for a minimalist UI.
+
+### 4. Development Principles
+- **Keep it Simple**: Avoid "fancy" UI displays or complex color-coded levels.
+- **Accuracy**: Ensure the `[function-tag]` correctly reflects the business logic area being logged.
