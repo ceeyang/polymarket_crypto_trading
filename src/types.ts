@@ -52,18 +52,22 @@ export interface SelectedMarket {
   score: number;
 }
 
-export interface StrategyExecutionMeta {
-  mode: "DUAL_SIDE_OPENING";
-  marketStartTime: string;
-  marketEndTime: string;
-  orderPrice?: number;
-  orderShareSize?: number;
-  orderEntries: StrategyOrderPlanEntry[];
-  plannedOrderCount: number;
-  plannedNotionalPerSideUsd: number;
-  plannedTotalNotionalUsd: number;
-  sides: SideName[];
-}
+export type StrategyExecutionMeta = 
+  | {
+      mode: "DUAL_SIDE_OPENING";
+      marketStartTime: string;
+      marketEndTime: string;
+      orderPrice?: number;
+      orderShareSize?: number;
+      orderEntries: StrategyOrderPlanEntry[];
+      plannedOrderCount: number;
+      plannedNotionalPerSideUsd: number;
+      plannedTotalNotionalUsd: number;
+      sides: SideName[];
+    } 
+  | {
+      mode: "HIGH_WIN_RATE_SPRINT";
+    };
 
 export interface LiveTradeRecord {
   marketId: string;
@@ -91,6 +95,7 @@ export interface LiveTradeRecord {
   orderStatus?: string;
   officialPnlUsd?: number;
   settlementSource?: "BINANCE_PROXY" | "POLYMARKET_OFFICIAL" | "POLYMARKET_MARK_PRICE";
+  strategyMeta?: StrategyExecutionMeta;
 }
 
 export interface PredictionAuditRecord {

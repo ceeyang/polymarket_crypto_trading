@@ -3,19 +3,33 @@
     "dryRun": false,
     "pollIntervalSec": 20,
     "autoClaim": true,
-    "claimIntervalSec": 50000
+    "claimIntervalSec": 600
   },
   "strategy": {
-    "orderEntries": [
-      {
-        "price": 0.02,
-        "shareSize": 5
-      },
-      {
-        "price": 0.01,
-        "shareSize": 10
-      }
-    ],
+    "dualSide": {
+      "enabled": false,
+      "orderEntries": [
+        {
+          "price": 0.1,
+          "shareSize": 15
+        },
+        {
+          "price": 0.05,
+          "shareSize": 20
+        },
+        {
+          "price": 0.02,
+          "shareSize": 50
+        }
+      ]
+    },
+    "hwr": {
+      "enabled": true,
+      "triggerSeconds": 60,
+      "minPrice": 0.8,
+      "maxPrice": 0.9,
+      "fixedSizeUsd": 1
+    },
     "targets": [
       {
         "id": "BTC_5m",

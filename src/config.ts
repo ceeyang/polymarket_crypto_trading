@@ -33,14 +33,24 @@ export interface RuntimeConfigFile {
   runtime: {
     dryRun: boolean;
     pollIntervalSec: number;
-    autoClaim?: boolean;
-    claimIntervalSec?: number;
+    autoClaim: boolean;
+    claimIntervalSec: number;
   };
   strategy: {
-    orderEntries?: Partial<StrategyOrderEntry>[];
-    fixedOrderPrice?: number;
-    orderShareSize?: number;
-    targets?: Partial<MarketTarget>[];
+    // 双边对冲策略模块
+    dualSide: {
+      enabled: boolean;
+      orderEntries: StrategyOrderEntry[];
+    };
+    // 高胜率冲刺策略模块
+    hwr: {
+      enabled: boolean;
+      triggerSeconds: number;
+      minPrice: number;
+      maxPrice: number;
+      fixedSizeUsd: number;
+    };
+    targets: MarketTarget[];
   };
   network: {
     polyHost: string;
@@ -48,7 +58,7 @@ export interface RuntimeConfigFile {
     dataApiHost: string;
     rpcUrl: string;
     rpcUrls?: string[];
-    relayerHost?: string;
+    relayerHost: string;
     relayerTxType?: string;
     chainId: number;
     signatureType: number;
@@ -62,8 +72,16 @@ export interface Config {
   pollIntervalSec: number;
   autoClaim: boolean;
   claimIntervalSec: number;
-  horizonMin: SupportedHorizon;
+  
+  // 策略模块化导出
+  dualSideEnabled: boolean;
   orderEntries: StrategyOrderEntry[];
+  
+  hwrEnabled: boolean;
+  hwrTriggerSeconds: number;
+  hwrMinPrice: number;
+  hwrMaxPrice: number;
+  hwrFixedSizeUsd: number;
   polyHost: string;
   gammaHost: string;
   dataApiHost: string;
@@ -224,15 +242,35 @@ export function writeRuntimeConfig(next: RuntimeConfigFile): void {
 }
 
 function normalizeRuntimeConfigFile(input: RuntimeConfigFile): RuntimeConfigFile {
+  const runtime = {
+    dryRun: input.runtime?.dryRun !== false,
+    pollIntervalSec: parsePositiveInt(input.runtime?.pollIntervalSec, 20),
+    autoClaim: input.runtime?.autoClaim !== false,
+    claimIntervalSec: parsePositiveInt(input.runtime?.claimIntervalSec, 1800),
+  };
+
+  const dualSide = {
+    enabled: input.strategy?.dualSide?.enabled !== false,
+    orderEntries: normalizeOrderEntries(
+      input.strategy?.dualSide?.orderEntries, 
+      (input.strategy as any)?.fixedOrderPrice, 
+      (input.strategy as any)?.orderShareSize
+    ),
+  };
+
+  const hwr = {
+    enabled: Boolean(input.strategy?.hwr?.enabled),
+    triggerSeconds: parsePositiveInt(input.strategy?.hwr?.triggerSeconds, 60),
+    minPrice: typeof input.strategy?.hwr?.minPrice === "number" ? input.strategy.hwr.minPrice : 0.95,
+    maxPrice: typeof input.strategy?.hwr?.maxPrice === "number" ? input.strategy.hwr.maxPrice : 0.99,
+    fixedSizeUsd: typeof input.strategy?.hwr?.fixedSizeUsd === "number" ? input.strategy.hwr.fixedSizeUsd : 1.0,
+  };
+
   return {
-    runtime: {
-      dryRun: input.runtime?.dryRun !== false,
-      pollIntervalSec: parsePositiveInt(input.runtime?.pollIntervalSec, 20),
-      autoClaim: input.runtime?.autoClaim !== false,
-      claimIntervalSec: parsePositiveInt(input.runtime?.claimIntervalSec, 1800),
-    },
+    runtime,
     strategy: {
-      orderEntries: normalizeOrderEntries(input.strategy?.orderEntries, input.strategy?.fixedOrderPrice, input.strategy?.orderShareSize),
+      dualSide,
+      hwr,
       targets: normalizeTargets(input.strategy?.targets),
     },
     network: {
@@ -251,10 +289,12 @@ export function loadConfig(): Config {
     ...(Array.isArray(rc.network.rpcUrls) ? rc.network.rpcUrls : []),
     rc.network.rpcUrl,
   ].map((x) => String(x || "").trim()).filter(Boolean)));
+  
   const signatureType = parseSignatureType(
     process.env.SIGNATURE_TYPE ?? process.env.POLY_SIGNATURE_TYPE,
     rc.network.signatureType ?? 2,
   );
+  
   const relayerTxTypeFromEnv = normalizeRelayerTxType(process.env.RELAYER_TX_TYPE);
   const relayerTxTypeFromRuntime = normalizeRelayerTxType(rc.network.relayerTxType);
   const relayerTxType = relayerTxTypeFromEnv
@@ -262,12 +302,22 @@ export function loadConfig(): Config {
     ?? (signatureType === 2 ? "SAFE" : "PROXY");
 
   return {
-    dryRun: rc.runtime.dryRun !== false,
-    pollIntervalSec: parsePositiveInt(rc.runtime.pollIntervalSec, 20),
-    autoClaim: rc.runtime.autoClaim !== false,
-    claimIntervalSec: parsePositiveInt(rc.runtime.claimIntervalSec, 300),
-    horizonMin: 5,
-    orderEntries: normalizeOrderEntries(rc.strategy.orderEntries, rc.strategy.fixedOrderPrice, rc.strategy.orderShareSize),
+    dryRun: rc.runtime.dryRun,
+    pollIntervalSec: rc.runtime.pollIntervalSec,
+    autoClaim: rc.runtime.autoClaim,
+    claimIntervalSec: rc.runtime.claimIntervalSec,
+    
+    // 双边策略导出
+    dualSideEnabled: rc.strategy.dualSide.enabled,
+    orderEntries: rc.strategy.dualSide.orderEntries,
+    
+    // HWR 策略导出
+    hwrEnabled: rc.strategy.hwr.enabled,
+    hwrTriggerSeconds: rc.strategy.hwr.triggerSeconds,
+    hwrMinPrice: rc.strategy.hwr.minPrice,
+    hwrMaxPrice: rc.strategy.hwr.maxPrice,
+    hwrFixedSizeUsd: rc.strategy.hwr.fixedSizeUsd,
+
     polyHost: rc.network.polyHost,
     gammaHost: rc.network.gammaHost,
     dataApiHost: rc.network.dataApiHost,
@@ -279,7 +329,7 @@ export function loadConfig(): Config {
     signatureType,
     usdcAddress: rc.network.usdcAddress,
     ctfAddress: rc.network.ctfAddress,
-    targets: normalizeTargets(rc.strategy.targets),
+    targets: rc.strategy.targets,
     privateKey: process.env.PRIVATE_KEY ?? "",
     funderAddress: process.env.FUNDER_ADDRESS,
     apiKey: process.env.POLY_API_KEY,

@@ -186,6 +186,44 @@
       background: rgba(255, 255, 255, 0.94);
     }
 
+    .strategy-module {
+      margin-top: 20px;
+      border: 2px solid #eef2f7;
+      background: #fff;
+      transition: border-color 0.2s ease;
+    }
+
+    .strategy-module:focus-within {
+      border-color: var(--primary);
+    }
+
+    .module-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    .module-title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .module-icon {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, var(--bg-1), #fff);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 18px;
+    }
+
     .field {
       display: flex;
       flex-direction: column;
@@ -775,7 +813,7 @@
     <section class="card panel active" data-panel="runtime">
       <div class="toolbar">
         <div>
-          <h2>运行与双边挂单配置</h2>
+          <h2>运行与策略配置</h2>
           <div class="muted" id="cfgStatus">配置未加载</div>
         </div>
         <div class="row">
@@ -792,13 +830,55 @@
             <label class="toggle"><input id="autoClaim" type="checkbox" />自动领取收益</label>
             <div class="field"><label for="pollIntervalSec">轮询间隔(秒)</label><input id="pollIntervalSec" type="number"
                 min="5" step="1" /></div>
-            <div class="field"><label for="claimIntervalSec">收益提取间隔(秒) <span id="claimCountdown" style="color:var(--primary);margin-left:8px;font-weight:600;font-size:11px;"></span></label><input id="claimIntervalSec" type="number"
-                min="60" step="10" /></div>
+            <div class="field"><label for="claimIntervalSec">收益提取间隔(秒) <span id="claimCountdown"
+                  style="color:var(--primary);margin-left:8px;font-weight:600;font-size:11px;"></span></label><input
+                id="claimIntervalSec" type="number" min="60" step="10" /></div>
           </div>
         </div>
 
-        <div class="section">
-          <h2>挂单参数</h2>
+        <!-- 模块：HWR 冲刺策略 -->
+        <div class="section strategy-module" id="mod-hwr">
+          <div class="module-header">
+            <div class="module-title-group">
+              <span class="module-icon">⚡</span>
+              <h2>高胜率冲刺 (HWR) 策略</h2>
+            </div>
+            <label class="toggle"><input id="hwrEnabled" type="checkbox" />开启策略</label>
+          </div>
+          <div class="muted">在 5 分钟盘口结算前自动购买高胜率的一方 ($1)，追求极高确定性的小额收益。</div>
+
+          <div class="grid-2" style="margin-top: 14px;">
+            <div class="field">
+              <label for="hwrTriggerSeconds">结算前触发秒数 (s)</label>
+              <input id="hwrTriggerSeconds" type="number" min="1" max="300" step="1" />
+            </div>
+            <div class="field">
+              <label for="hwrFixedSizeUsd">每次固定投入 ($)</label>
+              <input id="hwrFixedSizeUsd" type="number" min="0.1" max="100" step="0.1" />
+            </div>
+          </div>
+
+          <div class="grid-2" style="margin-top: 14px;">
+            <div class="field">
+              <label for="hwrMinPrice">最低入场价 (默认 0.95)</label>
+              <input id="hwrMinPrice" type="number" min="0.5" max="0.99" step="0.01" />
+            </div>
+            <div class="field">
+              <label for="hwrMaxPrice">最高入场价 (默认 0.99)</label>
+              <input id="hwrMaxPrice" type="number" min="0.5" max="0.999" step="0.001" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 模块：Dual-Side 对冲策略 -->
+        <div class="section strategy-module" id="mod-dual-side">
+          <div class="module-header">
+            <div class="module-title-group">
+              <span class="module-icon">⚖️</span>
+              <h2>双边对冲 (Dual-Side) 策略</h2>
+            </div>
+            <label class="toggle"><input id="dualSideEnabled" type="checkbox" />开启策略</label>
+          </div>
           <div class="spec-grid" style="margin-top: 12px; margin-bottom: 12px;">
             <div class="spec-card">
               <div class="spec-label">支持周期</div>
@@ -895,9 +975,12 @@
         </div>
 
         <div class="trade-summary">
-          <div class="trade-stat"><span class="muted" title="所有真实吃单的实际花销">总试错过路费</span><strong id="sTotalCost">$0.00</strong></div>
-          <div class="trade-stat"><span class="muted" title="真实单边被吃次数（必定亏损）">已损失的单边过路</span><strong id="sSingles" style="color:var(--danger)">0 次</strong></div>
-          <div class="trade-stat"><span class="muted" title="发生插针，成功吃到双边！">完美双吃打针回本</span><strong id="sDoubles" style="color:var(--success)">0 次</strong></div>
+          <div class="trade-stat"><span class="muted" title="所有真实吃单的实际花销">总试错过路费</span><strong
+              id="sTotalCost">$0.00</strong></div>
+          <div class="trade-stat"><span class="muted" title="真实单边被吃次数（必定亏损）">已损失的单边过路</span><strong id="sSingles"
+              style="color:var(--danger)">0 次</strong></div>
+          <div class="trade-stat"><span class="muted" title="发生插针，成功吃到双边！">完美双吃打针回本</span><strong id="sDoubles"
+              style="color:var(--success)">0 次</strong></div>
           <div class="trade-stat"><span class="muted">账户累计链上纯利</span><strong id="sPnL">$0.0000</strong></div>
         </div>
 
@@ -1053,18 +1136,12 @@
     }
 
     function getConfigOrderEntries(cfg) {
-      const entries = Array.isArray(cfg?.strategy?.orderEntries) ? cfg.strategy.orderEntries : [];
+      const entries = Array.isArray(cfg?.strategy?.dualSide?.orderEntries) ? cfg.strategy.dualSide.orderEntries : [];
       if (entries.length) {
         return entries.map((entry) => ({
           price: normalizeOrderPrice(entry?.price, 0.01),
           shareSize: normalizeOrderShareSize(entry?.shareSize, 10),
         }));
-      }
-      if (cfg?.strategy?.fixedOrderPrice || cfg?.strategy?.orderShareSize) {
-        return [{
-          price: normalizeOrderPrice(cfg?.strategy?.fixedOrderPrice, 0.01),
-          shareSize: normalizeOrderShareSize(cfg?.strategy?.orderShareSize, 10),
-        }];
       }
       return cloneDefaultOrderEntries();
     }
@@ -1295,13 +1372,13 @@
       // --- Part 1: Tiers Analysis ---
       const tiersSection = document.createElement("div");
       tiersSection.innerHTML = `<h3 style="margin:20px 18px 10px; font-size:16px;">📊 各盘口挂单深度成功率 (只显示有历史痕迹的层级)</h3>`;
-      
+
       const grid = document.createElement("div");
       grid.style.display = "flex";
       grid.style.flexDirection = "column";
       grid.style.gap = "16px";
       grid.style.padding = "0 18px";
-      
+
       for (const tg of data.targets) {
         if (!tg.tiers || tg.tiers.length === 0) continue;
         const tgCard = document.createElement("div");
@@ -1309,13 +1386,13 @@
         tgCard.style.borderRadius = "12px";
         tgCard.style.background = "#fff";
         tgCard.style.overflow = "hidden";
-        
+
         let rowsHtml = "";
         for (const tier of tg.tiers) {
-           const fillRate = tier.markets > 0 ? (tier.doubleFills / tier.markets * 100).toFixed(2) : "0.00";
-           const tierYieldPct = tier.cost > 0 ? (tier.pnl / tier.cost * 100).toFixed(2) : "0.00";
-           const pnlColor = tier.pnl >= 0 ? 'var(--success)' : 'var(--danger)';
-           rowsHtml += `
+          const fillRate = tier.markets > 0 ? (tier.doubleFills / tier.markets * 100).toFixed(2) : "0.00";
+          const tierYieldPct = tier.cost > 0 ? (tier.pnl / tier.cost * 100).toFixed(2) : "0.00";
+          const pnlColor = tier.pnl >= 0 ? 'var(--success)' : 'var(--danger)';
+          rowsHtml += `
               <tr style="border-bottom: 1px solid rgba(0,0,0,0.03);">
                 <td style="font-weight:600; padding:10px 18px;">$${tier.price}</td>
                 <td style="padding:10px;">${fmtNumber(tier.winShares || 0, 1)}</td>
@@ -1326,7 +1403,7 @@
               </tr>
            `;
         }
-        
+
         const targetYieldPct = tg.totalCost > 0 ? (tg.totalPnl / tg.totalCost * 100).toFixed(2) : "0.00";
         const targetFillRate = tg.totalPlanned > 0 ? (tg.totalMatched / tg.totalPlanned * 100).toFixed(2) : "0.00";
         const targetPnlColor = tg.totalPnl >= 0 ? 'var(--success)' : 'var(--danger)';
@@ -1387,20 +1464,20 @@
       `;
 
       if (data.winMarkets.length === 0) {
-         winSection.innerHTML += `<div style="padding: 20px 18px; color:var(--muted); font-style:italic;">暂未捕获任何画门双吃盘口，耐心等待极端行情...</div>`;
+        winSection.innerHTML += `<div style="padding: 20px 18px; color:var(--muted); font-style:italic;">暂未捕获任何画门双吃盘口，耐心等待极端行情...</div>`;
       } else {
-         const winTableWrap = document.createElement("div");
-         winTableWrap.style.padding = "0 18px";
-         winTableWrap.style.overflow = "auto";
-         
-         let rowsHtml = "";
-          for (const m of data.winMarkets) {
-             const isDouble = m.isDoubleFill;
-             const doubleBadge = isDouble ? `<span class="badge side-yes" style="font-size:10px">双边通吃</span>` : "";
-             const finalPnl = m.expectedPnl ?? m.totalPnl ?? 0;
-             const yieldPct = m.totalNotional > 0 ? (finalPnl / m.totalNotional * 100).toFixed(0) : "0";
-             const detailsHtml = m.winDetails ? `<div style="font-size:11.5px; color:var(--primary); margin-top:5px; font-weight:500;">${escapeHtml(m.winDetails)}</div>` : "";
-             rowsHtml += `
+        const winTableWrap = document.createElement("div");
+        winTableWrap.style.padding = "0 18px";
+        winTableWrap.style.overflow = "auto";
+
+        let rowsHtml = "";
+        for (const m of data.winMarkets) {
+          const isDouble = m.isDoubleFill;
+          const doubleBadge = isDouble ? `<span class="badge side-yes" style="font-size:10px">双边通吃</span>` : "";
+          const finalPnl = m.expectedPnl ?? m.totalPnl ?? 0;
+          const yieldPct = m.totalNotional > 0 ? (finalPnl / m.totalNotional * 100).toFixed(0) : "0";
+          const detailsHtml = m.winDetails ? `<div style="font-size:11.5px; color:var(--primary); margin-top:5px; font-weight:500;">${escapeHtml(m.winDetails)}</div>` : "";
+          rowsHtml += `
                 <tr style="border-bottom:1px solid #e7eef7;">
                   <td style="padding:12px;"><strong>${escapeHtml(m.title)}</strong><div style="font-size:11px; color:var(--muted); margin-top:4px;">${fmtTime(m.entryTime)}</div></td>
                   <td style="padding:12px;">${doubleBadge}${detailsHtml}</td>
@@ -1415,8 +1492,8 @@
                   </td>
                 </tr>
              `;
-          }
-         winTableWrap.innerHTML = `
+        }
+        winTableWrap.innerHTML = `
             <table style="width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--border); border-radius:8px; overflow:hidden;">
               <thead style="background:#fdfdfd; border-bottom:1px solid var(--border);">
                  <tr>
@@ -1430,47 +1507,101 @@
               <tbody>${rowsHtml}</tbody>
             </table>
          `;
-         winSection.appendChild(winTableWrap);
+        winSection.appendChild(winTableWrap);
       }
       wrapper.appendChild(winSection);
     }
 
 
 
-    function fillForm(cfg) {
-      setValue("pollIntervalSec", cfg.runtime.pollIntervalSec);
-      setValue("claimIntervalSec", cfg.runtime.claimIntervalSec || 1800);
-      renderOrderEntries(getConfigOrderEntries(cfg));
-      document.getElementById("dryRun").checked = Boolean(cfg.runtime.dryRun);
-      document.getElementById("autoClaim").checked = Boolean(cfg.runtime.autoClaim);
-      renderTargets(cfg.strategy.targets || []);
-      renderTradeTargets(cfg.strategy.targets || []);
-      modePill.textContent = cfg.runtime.dryRun ? "当前配置: DRY_RUN" : "当前配置: LIVE";
-    }
+    const ConfigurationUI = {
+      modules: {
+        runtime: {
+          fill: (cfg) => {
+            setValue("pollIntervalSec", cfg.runtime?.pollIntervalSec);
+            setValue("claimIntervalSec", cfg.runtime?.claimIntervalSec || 1800);
+            document.getElementById("dryRun").checked = Boolean(cfg.runtime?.dryRun);
+            document.getElementById("autoClaim").checked = Boolean(cfg.runtime?.autoClaim);
+          },
+          read: (next) => {
+            next.runtime.dryRun = document.getElementById("dryRun").checked;
+            next.runtime.autoClaim = document.getElementById("autoClaim").checked;
+            next.runtime.pollIntervalSec = Math.max(5, Math.round(num("pollIntervalSec", next.runtime.pollIntervalSec || 20)));
+            next.runtime.claimIntervalSec = Math.max(60, Math.round(num("claimIntervalSec", next.runtime.claimIntervalSec || 1800)));
+          }
+        },
+        dualSide: {
+          fill: (cfg) => {
+            document.getElementById("dualSideEnabled").checked = Boolean(cfg.strategy?.dualSide?.enabled);
+            renderOrderEntries(getConfigOrderEntries(cfg));
+          },
+          read: (next) => {
+            if (!next.strategy.dualSide) next.strategy.dualSide = {};
+            next.strategy.dualSide.enabled = document.getElementById("dualSideEnabled").checked;
+            next.strategy.dualSide.orderEntries = readRenderedOrderEntries();
+          }
+        },
+        hwr: {
+          fill: (cfg) => {
+            document.getElementById("hwrEnabled").checked = Boolean(cfg.strategy?.hwr?.enabled);
+            setValue("hwrTriggerSeconds", cfg.strategy?.hwr?.triggerSeconds || 60);
+            setValue("hwrFixedSizeUsd", cfg.strategy?.hwr?.fixedSizeUsd || 1.0);
+            setValue("hwrMinPrice", cfg.strategy?.hwr?.minPrice || 0.95);
+            setValue("hwrMaxPrice", cfg.strategy?.hwr?.maxPrice || 0.99);
+          },
+          read: (next) => {
+            if (!next.strategy.hwr) next.strategy.hwr = {};
+            next.strategy.hwr.enabled = document.getElementById("hwrEnabled").checked;
+            next.strategy.hwr.triggerSeconds = Math.round(num("hwrTriggerSeconds", 60));
+            next.strategy.hwr.fixedSizeUsd = num("hwrFixedSizeUsd", 1.0);
+            next.strategy.hwr.minPrice = num("hwrMinPrice", 0.95);
+            next.strategy.hwr.maxPrice = num("hwrMaxPrice", 0.99);
+          }
+        },
+        targets: {
+          fill: (cfg) => {
+            renderTargets(cfg.strategy?.targets || []);
+            renderTradeTargets(cfg.strategy?.targets || []);
+          },
+          read: (next) => {
+            const checks = document.querySelectorAll(".target-enabled");
+            checks.forEach((el) => {
+              const idx = Number(el.getAttribute("data-idx"));
+              const target = next.strategy.targets?.[idx];
+              if (!target) return;
+              target.enabled = Boolean(el.checked);
+            });
+          }
+        }
+      },
+      fillAll: (cfg) => {
+        Object.values(ConfigurationUI.modules).forEach(m => m.fill(cfg));
+        modePill.textContent = cfg.runtime?.dryRun ? "当前配置: DRY_RUN" : "当前配置: LIVE";
+      },
+      readAll: () => {
+        const next = JSON.parse(JSON.stringify(fullConfig));
+        Object.values(ConfigurationUI.modules).forEach(m => m.read(next));
 
-    function readTargets(next) {
-      const checks = document.querySelectorAll(".target-enabled");
-      checks.forEach((el) => {
-        const idx = Number(el.getAttribute("data-idx"));
-        const target = next.strategy.targets?.[idx];
-        if (!target) return;
-        target.enabled = Boolean(el.checked);
-      });
+        // Final Cleanup
+        delete next.strategy.orderEntries;
+        delete next.strategy.fixedOrderPrice;
+        delete next.strategy.orderShareSize;
+        delete next.runtime.highWinRateEnabled;
+        delete next.runtime.hwrEnabled;
+        delete next.runtime.hwrTriggerSeconds;
+        delete next.runtime.hwrFixedSizeUsd;
+        delete next.runtime.hwrMinPrice;
+        delete next.runtime.hwrMaxPrice;
+        return next;
+      }
+    };
+
+    function fillForm(cfg) {
+      ConfigurationUI.fillAll(cfg);
     }
 
     function readFormToConfig() {
-      const next = JSON.parse(JSON.stringify(fullConfig));
-      next.runtime.dryRun = document.getElementById("dryRun").checked;
-      next.runtime.autoClaim = document.getElementById("autoClaim").checked;
-      next.runtime.pollIntervalSec = Math.max(5, Math.round(num("pollIntervalSec", next.runtime.pollIntervalSec || 20)));
-      next.runtime.claimIntervalSec = Math.max(60, Math.round(num("claimIntervalSec", next.runtime.claimIntervalSec || 1800)));
-      next.strategy.orderEntries = readRenderedOrderEntries();
-      delete next.strategy.fixedOrderPrice;
-      delete next.strategy.orderShareSize;
-
-      readTargets(next);
-
-      return next;
+      return ConfigurationUI.readAll();
     }
 
     async function loadConfig() {
@@ -1511,14 +1642,14 @@
       try {
         const resp = await apiFetch("/api/trades/analysis");
         const data = await resp.json();
-        
+
         if (resp.ok) {
-           // Apply client-side filters if needed
-           if (tradeQuery.targetId) {
-             data.targets = data.targets.filter(t => t.targetId === tradeQuery.targetId);
-             data.winMarkets = data.winMarkets.filter(m => m.targetId === tradeQuery.targetId);
-           }
-           renderAnalysisDashboard(data);
+          // Apply client-side filters if needed
+          if (tradeQuery.targetId) {
+            data.targets = data.targets.filter(t => t.targetId === tradeQuery.targetId);
+            data.winMarkets = data.winMarkets.filter(m => m.targetId === tradeQuery.targetId);
+          }
+          renderAnalysisDashboard(data);
         }
 
         tradeStatus.textContent = `更新于 ${new Date().toLocaleTimeString()}`;
@@ -1766,15 +1897,24 @@
       setInterval(() => {
         const span = document.getElementById("claimCountdown");
         if (!span) return;
-        const autoClaim = document.getElementById("autoClaim")?.checked;
-        if (!autoClaim) {
-           span.textContent = "";
-           return;
+        const config = {
+          autoClaim: document.getElementById("autoClaim").checked,
+          pollIntervalSec: parseInt(document.getElementById("pollIntervalSec").value, 10),
+          claimIntervalSec: parseInt(document.getElementById("claimIntervalSec").value, 10),
+          hwrEnabled: document.getElementById("hwrEnabled").checked,
+          hwrTriggerSeconds: parseInt(document.getElementById("hwrTriggerSeconds").value, 10),
+          hwrFixedSizeUsd: parseFloat(document.getElementById("hwrFixedSizeUsd").value),
+          hwrMinPrice: parseFloat(document.getElementById("hwrMinPrice").value),
+          hwrMaxPrice: parseFloat(document.getElementById("hwrMaxPrice").value),
+        };
+        if (!config.autoClaim) {
+          span.textContent = "";
+          return;
         }
-        const intervalSec = Number(document.getElementById("claimIntervalSec")?.value || 1800);
+        const intervalSec = config.claimIntervalSec;
         if (globalLastClaimAtMs === 0) {
-           span.textContent = "(等待执行...)";
-           return;
+          span.textContent = "(等待执行...)";
+          return;
         }
         const intervalMs = intervalSec * 1000;
         const nowMs = Date.now();

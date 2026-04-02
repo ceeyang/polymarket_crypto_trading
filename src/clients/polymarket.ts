@@ -115,6 +115,28 @@ export class PolymarketTrader {
     return Array.isArray(rows) ? rows : [];
   }
 
+  /**
+   * 获取特定 Token 的最新盘口中间价/参考价
+   */
+  async getMidPrice(tokenId: string): Promise<{ bid: number, ask: number, mid: number }> {
+    if (!this.client) throw new Error("Polymarket client unavailable");
+    try {
+      if (typeof this.client.getOrderBook === "function") {
+        const ob = await this.client.getOrderBook(tokenId);
+        const bid = Number(ob?.bids?.[0]?.price || 0);
+        const ask = Number(ob?.asks?.[0]?.price || 0);
+        return { 
+          bid, 
+          ask, 
+          mid: (bid > 0 && ask > 0) ? (bid + ask) / 2 : (bid || ask || 0) 
+        };
+      }
+    } catch {
+      // fallback
+    }
+    return { bid: 0, ask: 0, mid: 0 };
+  }
+
   async getAverageFillPrice(orderId: string, fallback: number): Promise<number> {
     let fallbackPrice = fallback;
     let tradeIds: string[] = [];
@@ -194,8 +216,6 @@ export class PolymarketTrader {
   }
 
   private static async deriveApiCreds(client: any): Promise<ApiCreds> {
-    // Prefer derive first to avoid noisy "Could not create api key" logs
-    // from clients that call create() before derive().
     if (typeof client.deriveApiKey === "function") {
       const derived = await client.deriveApiKey();
       if (derived?.key) return derived;
@@ -217,8 +237,6 @@ export class PolymarketTrader {
 
   private static async probeApiCreds(client: any): Promise<any> {
     try {
-      // Probe with a protected endpoint used by balance flow so invalid/mismatched
-      // keys are caught before runtime usage.
       if (typeof client.getBalanceAllowance === "function") {
         return await client.getBalanceAllowance({ asset_type: "COLLATERAL" });
       }
@@ -284,145 +302,4 @@ export class PolymarketTrader {
     }
     throw lastErr instanceof Error ? lastErr : new Error("Failed to initialize ClobClient");
   }
-
-  createWebsocketClient(): any {
-    if (this.client && typeof this.client.createWebsocketClient === "function") {
-      return this.client.createWebsocketClient();
-    }
-    // Fallback: 手动实现原生 WebSocket 连接 (Polymarket CLOB 协议)
-    return new PolymarketWSManager(this.client, this.config);
-  }
 }
-
-/**
- * 手动实现的 Polymarket WebSocket 管理器
- * 基于 Polymarket CLOB WS 官方协议
- */
-class PolymarketWSManager {
-  private ws: any = null;
-  private openHandler: (() => void) | null = null;
-  private messageHandler: ((data: any) => void) | null = null;
-  private closeHandler: (() => void) | null = null;
-  private errorHandler: ((err: any) => void) | null = null;
-  
-  private host: string;
-  private isConnected = false;
-  private authPending = false;
-  private pendingSubscriptions: { type: string, ids?: string[] }[] = [];
-
-  constructor(private clob: any, private config: Config) {
-    // 根据 Host 转换 WS URL (https -> wss)
-    const base = config.polyHost.replace(/^http/, "ws");
-    this.host = base.endsWith("/ws") ? base : `${base.endsWith("/") ? base.slice(0, -1) : base}/ws`;
-  }
-
-  onOpen(fn: () => void) { this.openHandler = fn; }
-  onMessage(fn: (data: any) => void) { this.messageHandler = fn; }
-  onClose(fn: () => void) { this.closeHandler = fn; }
-  onError(fn: (err: any) => void) { this.errorHandler = fn; }
-
-  async connect() {
-    try {
-      this.ws = new (global as any).WebSocket(this.host);
-      
-      this.ws.onopen = async () => {
-        // 如果有 API Credentials，进行 Auth
-        if (this.clob?.creds?.key) {
-           await this.authenticate();
-        } else {
-           this.onAuthenticated();
-        }
-      };
-
-      this.ws.onmessage = (event: any) => {
-        const data = JSON.parse(event.data);
-        
-        // 处理 Auth 响应
-        if (data?.type === "auth") {
-          if (data?.success) {
-            this.onAuthenticated();
-          } else {
-            console.error("[ws] Auth Failed", data);
-            if (this.errorHandler) this.errorHandler(new Error(`WS Auth Failed: ${data?.message}`));
-          }
-          return;
-        }
-
-        if (this.messageHandler) this.messageHandler(data);
-      };
-
-      this.ws.onclose = () => { 
-        this.isConnected = false;
-        if (this.closeHandler) this.closeHandler(); 
-      };
-      
-      this.ws.onerror = (err: any) => { 
-        if (this.errorHandler) this.errorHandler(err); 
-      };
-      
-    } catch (err) {
-      if (this.errorHandler) this.errorHandler(err);
-    }
-  }
-
-  private async authenticate() {
-    this.authPending = true;
-    const ts = Math.floor(Date.now() / 1000);
-    const creds = this.clob.creds;
-    
-    let sig = "";
-    try {
-       // 尝试调用 SDK 的签名工具（如果可用）或者简单的 HMAC 模拟
-       // 签名明文: timestamp + "GET" + "/ws"
-       const { buildPolyHmacSignature } = await import("@polymarket/clob-client/dist/signing/hmac.js");
-       sig = buildPolyHmacSignature(creds.secret, ts, "GET", "/ws");
-    } catch (e) {
-       console.error("[ws] Signature Logic Failure", e);
-    }
-
-    if (sig) {
-      this.send({
-        type: "auth",
-        api_key: creds.key,
-        passphrase: creds.passphrase,
-        timestamp: String(ts),
-        signature: sig
-      });
-    }
-  }
-
-  private onAuthenticated() {
-    this.authPending = false;
-    this.isConnected = true;
-    if (this.openHandler) this.openHandler();
-    
-    // 执行累积的订阅
-    for (const sub of this.pendingSubscriptions) {
-       this.subscribe(sub.type, sub.ids);
-    }
-    this.pendingSubscriptions = [];
-  }
-
-  subscribe(channel: string, marketIds?: string[]) {
-    if (this.authPending || !this.isConnected || !this.ws || this.ws.readyState !== 1) {
-       this.pendingSubscriptions.push({ type: channel, ids: marketIds });
-       return;
-    }
-
-    const msg: any = {
-      type: "subscribe",
-      channels: [channel]
-    };
-    if (marketIds && marketIds.length > 0) {
-      msg.market_ids = marketIds;
-    }
-    this.send(msg);
-  }
-
-  private send(msg: any) {
-    if (this.ws && this.ws.readyState === 1) {
-      this.ws.send(JSON.stringify(msg));
-    }
-  }
-}
-

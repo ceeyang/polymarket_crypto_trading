@@ -132,7 +132,6 @@ function cycleStartInfo(
 function withTargetOverrides(cfg: Config, target: MarketTarget): Config {
   return {
     ...cfg,
-    horizonMin: target.horizonMin,
   };
 }
 
@@ -863,89 +862,8 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
   
-  // --- WebSocket 状态管理 ---
-  let wsClient: any = null;
-  let wsSubscribedTokens = new Set<string>();
-  let wsConnectionActive = false;
-  let lastWsPulseAtMs = 0;
-
-  async function connectWS(trader: PolymarketTrader) {
-    if (wsConnectionActive) return;
-    try {
-      wsClient = trader.createWebsocketClient();
-      if (!wsClient) {
-        logWarn("clob client does not support websockets, fallback to polling", {}, "ws");
-        return;
-      }
-
-      wsClient.onOpen(() => {
-        logSuccess("websocket connected", {}, "ws");
-        wsConnectionActive = true;
-        
-        // 订阅用户订单更新（极其重要：实时对账）
-        wsClient.subscribe("user");
-        
-        // 重新订阅之前的代币行情
-        const tokens = Array.from(wsSubscribedTokens);
-        if (tokens.length > 0) {
-           wsClient.subscribe("book", tokens);
-        }
-      });
-
-      wsClient.onMessage((msg: any) => {
-        lastWsPulseAtMs = Date.now();
-        const data = typeof msg === "string" ? JSON.parse(msg) : msg;
-        
-        // 处理订单成交/状态更新 (User Channel)
-        if (data?.event_type === "ORDER_UPDATE" || data?.topic === "user") {
-           const update = data?.event_payload || data?.data;
-           const orderId = update?.order_id || update?.id;
-           if (orderId) {
-             const status = String(update?.status || "UNKNOWN");
-             const filled = Number(update?.size_matched || update?.filled || 0);
-             const avgPx = Number(update?.average_filled_price || update?.avg_price || 0);
-             
-             state.updateTradeStatus(orderId, {
-               orderStatus: status,
-               matchedSize: filled,
-               entryPrice: avgPx > 0 ? avgPx : undefined
-             });
-             logInfo(`[ws-update] order status change: ${orderId} -> ${status}`, { filled }, "ws");
-           }
-        }
-        
-        // 可选：处理行情变动 (Book Channel)
-        // if (data?.topic?.startsWith("book:")) { ... }
-      });
-
-      wsClient.onClose(() => {
-        logWarn("websocket closed, scheduling reconnect", {}, "ws");
-        wsConnectionActive = false;
-      });
-
-      wsClient.onError((err: any) => {
-        logError("websocket error", err, "ws");
-        wsConnectionActive = false;
-      });
-
-      await wsClient.connect();
-    } catch (err) {
-      logError("failed to initiate websocket", err, "ws");
-    }
-  }
-
-  function syncWsSubscriptions(tokens: string[]) {
-    if (!wsConnectionActive || !wsClient) {
-      tokens.forEach(t => wsSubscribedTokens.add(t));
-      return;
-    }
-    const newTokens = tokens.filter(t => !wsSubscribedTokens.has(t));
-    if (newTokens.length > 0) {
-      wsClient.subscribe("book", newTokens);
-      newTokens.forEach(t => wsSubscribedTokens.add(t));
-      logInfo("ws subscribed to new tokens", { count: newTokens.length }, "ws");
-    }
-  }
+  // 高胜率模式已执行过的记录 (marketId -> true)
+  const hwrEvaluatedMarkets = new Set<string>();
   try {
     const claimFile = path.resolve("state", "last_claim.txt");
     lastAutoClaimAtMs = Number(fs.readFileSync(claimFile, "utf8").trim());
@@ -1080,13 +998,10 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       }
 
       // ── 异步订单对账（独立，非阻塞）──────────────────────────────────────
-      // --- 准备 WebSocket ---
-      if (!wsConnectionActive && !cfg.dryRun) {
-        await connectWS(trader);
-      }
+      // ── 异步订单对账（独立，非阻塞，基于轮询补偿）──────────────────────────────────────
+      const nowMs = Date.now();
 
       // ── 异步对账逻辑（仅作为 WS 丢包时的补偿，每 60s 运行一次）──────────────────────
-      const nowMs = Date.now();
       if (!cfg.dryRun && (nowMs % 60000 < 5000)) {
          const unresolvedTrades = (state.load().trades || [])
           .filter(t => t.executionMode === "LIVE" && t.orderId && !t.resolved)
@@ -1210,6 +1125,87 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       if (!scanEnabled) {
         continue;
       }
+      
+      // ── 高胜率模式 (HWR) 实时扫单逻辑 ─────────────────────────────────────
+      if (cfg.hwrEnabled) {
+        const tradesByMarket = state.load().trades || [];
+        for (const target of activeTargets) {
+          try {
+            // 获取当前该 Target 正在进行的 5m 盘口
+            const markets = await gamma.getCandidateMarketsForTarget(target, 100);
+            const best = gamma.selectBestMarketForTarget(markets, target, new Date(), new Set());
+            if (!best || hwrEvaluatedMarkets.has(best.marketId)) continue;
+            
+            // 检查倒计时 (hwrTriggerSeconds)
+            const endTimeMs = new Date(best.endDate).getTime();
+            const secondsToSettle = (endTimeMs - Date.now()) / 1000;
+            
+            if (secondsToSettle > 0 && secondsToSettle <= cfg.hwrTriggerSeconds) {
+              // 冲刺阶段，实时从 CLOB API 获取最新盘口价格 (极低延迟，规避 Rest 缓存)
+              const [yesBook, noBook] = await Promise.all([
+                trader.getMidPrice(best.yesTokenId),
+                trader.getMidPrice(best.noTokenId)
+              ]);
+              
+              const yesPx = yesBook.ask || best.yesPrice;
+              const noPx = noBook.ask || best.noPrice;
+              
+              const candidates = [
+                { side: "YES" as const, price: yesPx, tokenId: best.yesTokenId },
+                { side: "NO" as const, price: noPx, tokenId: best.noTokenId }
+              ];
+              
+              // 寻找价格在 [hwrMinPrice, hwrMaxPrice] 区间的一方
+              const winner = candidates.find(c => c.price >= cfg.hwrMinPrice && c.price <= cfg.hwrMaxPrice);
+              
+              if (winner) {
+                hwrEvaluatedMarkets.add(best.marketId);
+                const size = Number((cfg.hwrFixedSizeUsd / winner.price).toFixed(2));
+                
+                logInfo(`[HWR] Sprint trigger!`, { 
+                  marketId: best.marketId, 
+                  side: winner.side, 
+                  price: winner.price, 
+                  size,
+                  secondsToSettle: Math.round(secondsToSettle)
+                }, "high-win-rate");
+
+                const response = await trader.placeBuyOrder({
+                  tokenId: winner.tokenId,
+                  price: winner.price,
+                  size,
+                  tickSize: best.tickSize,
+                  negRisk: best.negRisk,
+                });
+                
+                if (response?.orderID || response?.orderId || response?.id || response?.dryRun) {
+                  state.recordTrade({
+                    marketId: best.marketId,
+                    conditionId: best.conditionId,
+                    marketTitle: best.title,
+                    targetId: target.id,
+                    coin: target.coin,
+                    horizonMin: target.horizonMin,
+                    symbol: targetLabel(target),
+                    side: winner.side,
+                    executionMode: cfg.dryRun ? "DRY_RUN" : "LIVE",
+                    entryTime: new Date().toISOString(),
+                    settleTime: best.endDate,
+                    entryRefPrice: winner.price,
+                    entryPrice: winner.price,
+                    entryNotionalUsd: cfg.hwrFixedSizeUsd,
+                    orderId: response?.orderId || response?.orderID || response?.id,
+                    orderStatus: "OPEN",
+                    strategyMeta: { mode: "HIGH_WIN_RATE_SPRINT" }
+                  });
+                }
+              }
+            }
+          } catch (err) {
+             // 策略执行中的非致命错误
+          }
+        }
+      }
 
       const tradedMarketIds = state.getTradedMarketIds();
       const activeContexts = activeTargets.map((target) => ({
@@ -1219,113 +1215,93 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         mergedCfg: withTargetOverrides(cfg, target),
       }));
 
-      const evaluations = await Promise.all(activeContexts.map(async (ctx): Promise<PreparedEvaluation | null> => {
-        const { target, label, symbol, mergedCfg } = ctx;
-        try {
-          if (targetAnalysisLocks.has(target.id)) return null;
+      const evaluations: (PreparedEvaluation | null)[] = [];
+      if (cfg.dualSideEnabled) {
+        const results = await Promise.all(activeContexts.map(async (ctx): Promise<PreparedEvaluation | null> => {
+          const { target, label, symbol, mergedCfg } = ctx;
+          try {
+            if (targetAnalysisLocks.has(target.id)) return null;
 
-          const markets = await gamma.getCandidateMarketsForTarget(target, 500);
-          const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
-          if (!best) return null;
+            const markets = await gamma.getCandidateMarketsForTarget(target, 500);
+            const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
+            if (!best) return null;
 
-          const windowCheck = isCurrentWindowByEnd(best.endDate, target.horizonMin);
-          if (!windowCheck.ok) {
-            logInfo(`[${label}] skip: not current window`, {
+            const windowCheck = isCurrentWindowByEnd(best.endDate, target.horizonMin);
+            if (!windowCheck.ok) {
+              logInfo(`[${label}] skip: not current window`, {
+                marketId: best.marketId,
+                endDate: best.endDate,
+                minsToEnd: Number.isFinite(windowCheck.minsToEnd) ? Number(windowCheck.minsToEnd.toFixed(3)) : null,
+                alignDiffMs: Number.isFinite(windowCheck.alignDiffMs) ? Math.round(windowCheck.alignDiffMs) : null,
+              }, "search-market");
+              return null;
+            }
+
+            const startInfo = cycleStartInfo(best.endDate, target.horizonMin);
+            if (!startInfo) {
+              logInfo(`[${label}] skip: invalid cycle timing`, { marketId: best.marketId, endDate: best.endDate }, "search-market");
+              return null;
+            }
+
+            const orderEntries = mergedCfg.orderEntries
+              .map((entry) => ({
+                price: Number(entry.price),
+                shareSize: Number(entry.shareSize),
+              }))
+              .filter((entry) => Number.isFinite(entry.price) && entry.price > 0 && Number.isFinite(entry.shareSize) && entry.shareSize > 0);
+            if (!orderEntries.length) {
+              logInfo(`[${label}] skip: no valid order entries`, { targetId: target.id }, "search-market");
+              return null;
+            }
+
+            const plannedOrderEntries = orderEntries.map((entry) => ({
+              price: Number(entry.price.toFixed(6)),
+              shareSize: Number(entry.shareSize.toFixed(6)),
+              plannedNotionalUsd: Number((entry.price * entry.shareSize).toFixed(6)),
+            }));
+            const plannedNotionalPerSideUsd = Number(plannedOrderEntries.reduce((sum, entry) => sum + entry.plannedNotionalUsd, 0).toFixed(6));
+            const audit: PredictionAuditRecord = {
+              id: predictionAuditId(target.id, best.marketId),
+              createdAt: new Date().toISOString(),
+              targetId: target.id,
+              coin: target.coin,
+              symbol,
+              horizonMin: target.horizonMin,
               marketId: best.marketId,
-              endDate: best.endDate,
-              minsToEnd: Number.isFinite(windowCheck.minsToEnd) ? Number(windowCheck.minsToEnd.toFixed(3)) : null,
-              alignDiffMs: Number.isFinite(windowCheck.alignDiffMs) ? Math.round(windowCheck.alignDiffMs) : null,
-            }, "search-market");
+              marketTitle: best.title,
+              decisionAction: "BUY",
+              decisionReason: `dual-sided ladder orders`,
+              strategyMeta: {
+                mode: "DUAL_SIDE_OPENING",
+                marketStartTime: new Date(startInfo.startMs).toISOString(),
+                marketEndTime: best.endDate,
+                orderEntries: plannedOrderEntries,
+                plannedOrderCount: plannedOrderEntries.length * 2,
+                plannedNotionalPerSideUsd,
+                plannedTotalNotionalUsd: Number((plannedNotionalPerSideUsd * 2).toFixed(6)),
+                sides: ["YES", "NO"],
+              },
+            };
+
+            const orders: PreparedOrder[] = plannedOrderEntries.flatMap((entry, index) => ([
+              {
+                target, label, symbol, best, side: "YES", orderPlanIndex: index, tokenId: best.yesTokenId,
+                limitPrice: entry.price, shareSize: entry.shareSize, entryRefPrice: best.yesPrice,
+              },
+              {
+                target, label, symbol, best, side: "NO", orderPlanIndex: index, tokenId: best.noTokenId,
+                limitPrice: entry.price, shareSize: entry.shareSize, entryRefPrice: best.noPrice,
+              },
+            ]));
+
+            return { audit, best, orders, cycleLockUntilMs: cycleLockExpireMs(best.endDate) };
+          } catch (err) {
+            logError(`[${label}] evaluation error`, err instanceof Error ? err.message : err, "search-market");
             return null;
           }
-
-          const startInfo = cycleStartInfo(best.endDate, target.horizonMin);
-          if (!startInfo) {
-            logInfo(`[${label}] skip: invalid cycle timing`, { marketId: best.marketId, endDate: best.endDate }, "search-market");
-            return null;
-          }
-
-          const orderEntries = mergedCfg.orderEntries
-            .map((entry) => ({
-              price: Number(entry.price),
-              shareSize: Number(entry.shareSize),
-            }))
-            .filter((entry) => Number.isFinite(entry.price) && entry.price > 0 && Number.isFinite(entry.shareSize) && entry.shareSize > 0);
-          if (!orderEntries.length) {
-            logInfo(`[${label}] skip: no valid order entries`, { targetId: target.id }, "search-market");
-            return null;
-          }
-
-          const plannedOrderEntries = orderEntries.map((entry) => ({
-            price: Number(entry.price.toFixed(6)),
-            shareSize: Number(entry.shareSize.toFixed(6)),
-            plannedNotionalUsd: Number((entry.price * entry.shareSize).toFixed(6)),
-          }));
-          const plannedNotionalPerSideUsd = Number(plannedOrderEntries.reduce((sum, entry) => sum + entry.plannedNotionalUsd, 0).toFixed(6));
-          const ladderText = plannedOrderEntries.map((entry) => `${entry.price.toFixed(4)}x${entry.shareSize}`).join(", ");
-          const audit: PredictionAuditRecord = {
-            id: predictionAuditId(target.id, best.marketId),
-            createdAt: new Date().toISOString(),
-            targetId: target.id,
-            coin: target.coin,
-            symbol,
-            horizonMin: target.horizonMin,
-            marketId: best.marketId,
-            marketTitle: best.title,
-            decisionAction: "BUY",
-            decisionReason: `dual-sided ladder orders: ${ladderText}`,
-            strategyMeta: {
-              mode: "DUAL_SIDE_OPENING",
-              marketStartTime: new Date(startInfo.startMs).toISOString(),
-              marketEndTime: best.endDate,
-              orderPrice: plannedOrderEntries[0]?.price,
-              orderShareSize: plannedOrderEntries[0]?.shareSize,
-              orderEntries: plannedOrderEntries,
-              plannedOrderCount: plannedOrderEntries.length * 2,
-              plannedNotionalPerSideUsd,
-              plannedTotalNotionalUsd: Number((plannedNotionalPerSideUsd * 2).toFixed(6)),
-              sides: ["YES", "NO"],
-            },
-          };
-
-          const orders: PreparedOrder[] = plannedOrderEntries.flatMap((entry, index) => ([
-            {
-              target,
-              label,
-              symbol,
-              best,
-              side: "YES",
-              orderPlanIndex: index,
-              tokenId: best.yesTokenId,
-              limitPrice: entry.price,
-              shareSize: entry.shareSize,
-              entryRefPrice: best.yesPrice,
-            },
-            {
-              target,
-              label,
-              symbol,
-              best,
-              side: "NO",
-              orderPlanIndex: index,
-              tokenId: best.noTokenId,
-              limitPrice: entry.price,
-              shareSize: entry.shareSize,
-              entryRefPrice: best.noPrice,
-            },
-          ]));
-
-          return {
-            audit,
-            best,
-            orders,
-            cycleLockUntilMs: cycleLockExpireMs(best.endDate),
-          };
-        } catch (targetErr) {
-          logInfo(`[${label}] loop error`, targetErr instanceof Error ? targetErr.message : targetErr, "search-market");
-          return null;
-        }
-      }));
+        }));
+        evaluations.push(...results);
+      }
 
       const readyEvaluations = evaluations.filter((x): x is PreparedEvaluation => Boolean(x));
       for (const evaluation of readyEvaluations) {
@@ -1351,8 +1327,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         tradedMarketIds.add(best.marketId);
 
         for (const order of orders) {
-          // 预订阅即将挂单的 Token
-          if (order.tokenId) syncWsSubscriptions([order.tokenId]);
+          // 正在执行下单流程
 
           const response = await trader.placeBuyOrder({
             tokenId: order.tokenId,
