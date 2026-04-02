@@ -10,7 +10,7 @@ import { PolymarketTrader } from "./clients/polymarket.js";
 import { readBotControlState, resolveBotControlMode, type BotControlMode } from "./services/bot-control.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
 import { StateStore } from "./services/state-store.js";
-import type { PredictionAuditRecord, SelectedMarket, SideName } from "./types.js";
+import type { LiveTradeRecord, PredictionAuditRecord, SelectedMarket, SideName } from "./types.js";
 import { sleep } from "./utils.js";
 
 const LOG_FILE = path.resolve("state", "runtime.log");
@@ -862,6 +862,90 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   const targetAnalysisLocks = new Map<string, number>();
   let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
+  
+  // --- WebSocket 状态管理 ---
+  let wsClient: any = null;
+  let wsSubscribedTokens = new Set<string>();
+  let wsConnectionActive = false;
+  let lastWsPulseAtMs = 0;
+
+  async function connectWS(trader: PolymarketTrader) {
+    if (wsConnectionActive) return;
+    try {
+      wsClient = trader.createWebsocketClient();
+      if (!wsClient) {
+        logWarn("clob client does not support websockets, fallback to polling", {}, "ws");
+        return;
+      }
+
+      wsClient.onOpen(() => {
+        logSuccess("websocket connected", {}, "ws");
+        wsConnectionActive = true;
+        
+        // 订阅用户订单更新（极其重要：实时对账）
+        wsClient.subscribe("user");
+        
+        // 重新订阅之前的代币行情
+        const tokens = Array.from(wsSubscribedTokens);
+        if (tokens.length > 0) {
+           wsClient.subscribe("book", tokens);
+        }
+      });
+
+      wsClient.onMessage((msg: any) => {
+        lastWsPulseAtMs = Date.now();
+        const data = typeof msg === "string" ? JSON.parse(msg) : msg;
+        
+        // 处理订单成交/状态更新 (User Channel)
+        if (data?.event_type === "ORDER_UPDATE" || data?.topic === "user") {
+           const update = data?.event_payload || data?.data;
+           const orderId = update?.order_id || update?.id;
+           if (orderId) {
+             const status = String(update?.status || "UNKNOWN");
+             const filled = Number(update?.size_matched || update?.filled || 0);
+             const avgPx = Number(update?.average_filled_price || update?.avg_price || 0);
+             
+             state.updateTradeStatus(orderId, {
+               orderStatus: status,
+               matchedSize: filled,
+               entryPrice: avgPx > 0 ? avgPx : undefined
+             });
+             logInfo(`[ws-update] order status change: ${orderId} -> ${status}`, { filled }, "ws");
+           }
+        }
+        
+        // 可选：处理行情变动 (Book Channel)
+        // if (data?.topic?.startsWith("book:")) { ... }
+      });
+
+      wsClient.onClose(() => {
+        logWarn("websocket closed, scheduling reconnect", {}, "ws");
+        wsConnectionActive = false;
+      });
+
+      wsClient.onError((err: any) => {
+        logError("websocket error", err, "ws");
+        wsConnectionActive = false;
+      });
+
+      await wsClient.connect();
+    } catch (err) {
+      logError("failed to initiate websocket", err, "ws");
+    }
+  }
+
+  function syncWsSubscriptions(tokens: string[]) {
+    if (!wsConnectionActive || !wsClient) {
+      tokens.forEach(t => wsSubscribedTokens.add(t));
+      return;
+    }
+    const newTokens = tokens.filter(t => !wsSubscribedTokens.has(t));
+    if (newTokens.length > 0) {
+      wsClient.subscribe("book", newTokens);
+      newTokens.forEach(t => wsSubscribedTokens.add(t));
+      logInfo("ws subscribed to new tokens", { count: newTokens.length }, "ws");
+    }
+  }
   try {
     const claimFile = path.resolve("state", "last_claim.txt");
     lastAutoClaimAtMs = Number(fs.readFileSync(claimFile, "utf8").trim());
@@ -996,14 +1080,21 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       }
 
       // ── 异步订单对账（独立，非阻塞）──────────────────────────────────────
-      if (trader && !cfg.dryRun) {
-        const unresolvedTrades = (state.load().trades || [])
+      // --- 准备 WebSocket ---
+      if (!wsConnectionActive && !cfg.dryRun) {
+        await connectWS(trader);
+      }
+
+      // ── 异步对账逻辑（仅作为 WS 丢包时的补偿，每 60s 运行一次）──────────────────────
+      const nowMs = Date.now();
+      if (!cfg.dryRun && (nowMs % 60000 < 5000)) {
+         const unresolvedTrades = (state.load().trades || [])
           .filter(t => t.executionMode === "LIVE" && t.orderId && !t.resolved)
           .filter(t => !["FILLED", "MATCHED", "CLOSED", "CANCELED", "EXPIRED", "REJECTED"].includes(String(t.orderStatus).toUpperCase()))
-          .slice(-30); // 仅追溯最近 30 笔进行对账
+          .slice(-20);
 
         for (const t of unresolvedTrades) {
-          if (t.orderId && reconcileInFlightCount < 3) {
+          if (t.orderId && reconcileInFlightCount < 2) {
             void reconcileOrder(trader, t.orderId, targetLabel({ coin: (t.coin as any), horizonMin: (t.horizonMin as any) } as any));
           }
         }
@@ -1260,6 +1351,9 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         tradedMarketIds.add(best.marketId);
 
         for (const order of orders) {
+          // 预订阅即将挂单的 Token
+          if (order.tokenId) syncWsSubscriptions([order.tokenId]);
+
           const response = await trader.placeBuyOrder({
             tokenId: order.tokenId,
             price: order.limitPrice,
@@ -1342,10 +1436,12 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
     } catch (err) {
       logError("main loop error", err instanceof Error ? err.message : err, "system");
     } finally {
-      await sleep((runtime?.cfg.pollIntervalSec ?? 20) * 1000);
+      // 提升循环频率至 1s，以便精准匹配 5 分钟入场时刻
+      await sleep(1000);
     }
   }
 }
+
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
