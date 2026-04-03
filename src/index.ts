@@ -12,6 +12,8 @@ import { claimRedeemablePositions } from "./services/claim-service.js";
 import { StateStore } from "./services/state-store.js";
 import type { LiveTradeRecord, PredictionAuditRecord, SelectedMarket, SideName } from "./types.js";
 import { sleep } from "./utils.js";
+import { RealtimePriceService } from "./services/realtime-price.js";
+
 
 const LOG_FILE = path.resolve("state", "runtime.log");
 const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
@@ -799,8 +801,10 @@ interface RuntimeContext {
   reloadToken: number;
   gamma: GammaClient;
   trader: PolymarketTrader;
+  priceService: RealtimePriceService;
   activeTargets: MarketTarget[];
 }
+
 
 type AutoClaimRaceResult =
   | { kind: "result"; summary: Awaited<ReturnType<typeof claimRedeemablePositions>> }
@@ -834,10 +838,16 @@ function readReloadToken(): number {
   }
 }
 
-async function buildRuntimeContext(cfgKey: string, reloadToken: number): Promise<RuntimeContext> {
+async function buildRuntimeContext(cfgKey: string, reloadToken: number, oldPriceService?: RealtimePriceService): Promise<RuntimeContext> {
   const cfg = loadConfig();
   const gamma = new GammaClient(cfg);
   const trader = await PolymarketTrader.create(cfg);
+
+  // Reuse or create price service
+  const priceService = oldPriceService ?? new RealtimePriceService(cfg);
+  if (!oldPriceService) {
+    await priceService.start();
+  }
 
   const enabledTargets = cfg.targets.filter((x) => x.enabled).slice(0, MAX_TARGETS);
   if (enabledTargets.length === 0) {
@@ -850,9 +860,11 @@ async function buildRuntimeContext(cfgKey: string, reloadToken: number): Promise
     reloadToken,
     gamma,
     trader,
+    priceService,
     activeTargets: enabledTargets,
   };
 }
+
 
 export async function startBot(options?: StartBotOptions): Promise<void> {
   const controlMode = options?.controlMode ?? resolveBotControlMode(process.env.BOT_CONTROL_MODE);
@@ -924,7 +936,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
     }
 
     try {
-      const next = await buildRuntimeContext(cfgKey, reloadToken);
+      const next = await buildRuntimeContext(cfgKey, reloadToken, runtime?.priceService);
       const isStartup = runtime == null;
       runtime = next;
 
@@ -1407,6 +1419,24 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         }
       }
 
+      // ── 实时价格监听 Token 更新 (每 10 次循环更新一次订阅列表以防频率过高) ──────
+      if (runtime?.priceService && (Date.now() % 10000 < 1000)) {
+        const tokensToWatch: string[] = [];
+        for (const target of activeTargets) {
+          try {
+            // 简单发现逻辑：获取可能的 candidates 并 watch 它们的 Token
+            // 这样 websocket 就能持续收到这些盘口的推送
+            const markets = await gamma.getCandidateMarketsForTarget(target, 10);
+            const best = gamma.selectBestMarketForTarget(markets, target, new Date(), new Set());
+            if (best) {
+              tokensToWatch.push(best.yesTokenId, best.noTokenId);
+            }
+          } catch { /* ignore */ }
+        }
+        if (tokensToWatch.length > 0) {
+          runtime.priceService.watchTokens(tokensToWatch);
+        }
+      }
 
     } catch (err) {
       logError("main loop error", err instanceof Error ? err.message : err, "system");

@@ -2,7 +2,7 @@
   "runtime": {
     "dryRun": false,
     "pollIntervalSec": 20,
-    "autoClaim": true,
+    "autoClaim": false,
     "claimIntervalSec": 600
   },
   "strategy": {
@@ -10,21 +10,13 @@
       "enabled": false,
       "orderEntries": [
         {
-          "price": 0.1,
-          "shareSize": 15
-        },
-        {
-          "price": 0.05,
-          "shareSize": 20
-        },
-        {
-          "price": 0.02,
-          "shareSize": 50
+          "price": 0.2,
+          "shareSize": 5
         }
       ]
     },
     "hwr": {
-      "enabled": true,
+      "enabled": false,
       "triggerSeconds": 60,
       "minPrice": 0.8,
       "maxPrice": 0.9,
@@ -33,7 +25,7 @@
     "targets": [
       {
         "id": "BTC_5m",
-        "enabled": false,
+        "enabled": true,
         "coin": "BTC",
         "horizonMin": 5,
         "symbol": "BTCUSDT"
@@ -54,7 +46,7 @@
       },
       {
         "id": "ETH_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "ETH",
         "horizonMin": 5,
         "symbol": "ETHUSDT"
@@ -75,7 +67,7 @@
       },
       {
         "id": "SOL_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "SOL",
         "horizonMin": 5,
         "symbol": "SOLUSDT"
@@ -96,7 +88,7 @@
       },
       {
         "id": "XRP_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "XRP",
         "horizonMin": 5,
         "symbol": "XRPUSDT"

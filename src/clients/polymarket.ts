@@ -137,6 +137,13 @@ export class PolymarketTrader {
     return { bid: 0, ask: 0, mid: 0 };
   }
 
+  /**
+   * 获取底层 ClobClient 实例，用于 WebSocket 等高级操作
+   */
+  getClobClient(): any {
+    return this.client;
+  }
+
   async getAverageFillPrice(orderId: string, fallback: number): Promise<number> {
     let fallbackPrice = fallback;
     let tradeIds: string[] = [];

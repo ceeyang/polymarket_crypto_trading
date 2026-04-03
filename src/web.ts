@@ -431,9 +431,9 @@ function validateRuntimeConfig(payload: unknown): { ok: true; data: RuntimeConfi
   if (Array.isArray(targets) && targets.length > MAX_TARGETS) {
     return { ok: false, error: `strategy.targets exceeds ${MAX_TARGETS}` };
   }
-  const orderEntries = data.strategy.orderEntries;
+  const orderEntries = data.strategy.dualSide?.orderEntries;
   if (Array.isArray(orderEntries) && orderEntries.length > MAX_ORDER_ENTRIES) {
-    return { ok: false, error: `strategy.orderEntries exceeds ${MAX_ORDER_ENTRIES}` };
+    return { ok: false, error: `strategy.dualSide.orderEntries exceeds ${MAX_ORDER_ENTRIES}` };
   }
   return { ok: true, data };
 }
