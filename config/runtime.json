@@ -2,7 +2,7 @@
   "runtime": {
     "dryRun": false,
     "pollIntervalSec": 20,
-    "autoClaim": false,
+    "autoClaim": true,
     "claimIntervalSec": 600
   },
   "strategy": {

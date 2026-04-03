@@ -1215,45 +1215,65 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         mergedCfg: withTargetOverrides(cfg, target),
       }));
 
+      // ── 1. 统一市场发现 (Market Discovery) ───────────────────────────────────
+      // 只要开启了双边对冲或 HWR，就进行盘口搜索
+      const targetDiscoveryMap = new Map<string, { best: SelectedMarket, target: MarketTarget }>();
+      const tokensToWatch: string[] = [];
+
+      // 只有在开启任意策略的情况下才进行 API 搜索
+      if (cfg.dualSideEnabled || cfg.hwrEnabled) {
+        for (const target of activeTargets) {
+          try {
+            // 如果该目标已有活跃锁，跳过搜索
+            if (targetAnalysisLocks.has(target.id)) continue;
+
+            const markets = await gamma.getCandidateMarketsForTarget(target, 50);
+            const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
+            
+            if (best) {
+              targetDiscoveryMap.set(target.id, { best, target });
+              
+              // 如果开启了 HWR，自动加入订阅列表并更新本地上下文
+              const mergedCfg = withTargetOverrides(cfg, target);
+              if (mergedCfg.hwrEnabled) {
+                tokensToWatch.push(best.yesTokenId, best.noTokenId);
+                hwrWatchMap.set(best.yesTokenId, { target, best, cfg: mergedCfg });
+                hwrWatchMap.set(best.noTokenId, { target, best, cfg: mergedCfg });
+              }
+            }
+          } catch (err) {
+            logError(`[${targetLabel(target)}] discovery error`, err instanceof Error ? err.message : err, "search-market");
+          }
+        }
+
+        // 更新 WebSocket 订阅
+        if (tokensToWatch.length > 0 && currentRuntime?.priceService) {
+          currentRuntime.priceService.watchTokens(tokensToWatch);
+        }
+      }
+
+      // ── 2. 执行双边对冲策略评估 (Dual Side Strategy) ──────────────────────────
       const evaluations: (PreparedEvaluation | null)[] = [];
       if (cfg.dualSideEnabled) {
-        const results = await Promise.all(activeContexts.map(async (ctx): Promise<PreparedEvaluation | null> => {
-          const { target, label, symbol, mergedCfg } = ctx;
+        // 直接从 discovery 数据中提取
+        for (const [targetId, discovery] of targetDiscoveryMap.entries()) {
+          const { best, target } = discovery;
+          const label = targetLabel(target);
+          const symbol = resolveSymbol(target);
+          const mergedCfg = withTargetOverrides(cfg, target);
+
           try {
-            if (targetAnalysisLocks.has(target.id)) return null;
-
-            const markets = await gamma.getCandidateMarketsForTarget(target, 500);
-            console.log("markets: ", markets);
-            const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
-            if (!best) return null;
-
             const windowCheck = isCurrentWindowByEnd(best.endDate, target.horizonMin);
-            if (!windowCheck.ok) {
-              logInfo(`[${label}] skip: not current window`, {
-                marketId: best.marketId,
-                endDate: best.endDate,
-                minsToEnd: Number.isFinite(windowCheck.minsToEnd) ? Number(windowCheck.minsToEnd.toFixed(3)) : null,
-                alignDiffMs: Number.isFinite(windowCheck.alignDiffMs) ? Math.round(windowCheck.alignDiffMs) : null,
-              }, "search-market");
-              return null;
-            }
+            if (!windowCheck.ok) continue;
 
             const startInfo = cycleStartInfo(best.endDate, target.horizonMin);
-            if (!startInfo) {
-              logInfo(`[${label}] skip: invalid cycle timing`, { marketId: best.marketId, endDate: best.endDate }, "search-market");
-              return null;
-            }
+            if (!startInfo) continue;
 
             const orderEntries = mergedCfg.orderEntries
-              .map((entry) => ({
-                price: Number(entry.price),
-                shareSize: Number(entry.shareSize),
-              }))
+              .map((entry) => ({ price: Number(entry.price), shareSize: Number(entry.shareSize) }))
               .filter((entry) => Number.isFinite(entry.price) && entry.price > 0 && Number.isFinite(entry.shareSize) && entry.shareSize > 0);
-            if (!orderEntries.length) {
-              logInfo(`[${label}] skip: no valid order entries`, { targetId: target.id }, "search-market");
-              return null;
-            }
+            
+            if (!orderEntries.length) continue;
 
             const plannedOrderEntries = orderEntries.map((entry) => ({
               price: Number(entry.price.toFixed(6)),
@@ -1261,6 +1281,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
               plannedNotionalUsd: Number((entry.price * entry.shareSize).toFixed(6)),
             }));
             const plannedNotionalPerSideUsd = Number(plannedOrderEntries.reduce((sum, entry) => sum + entry.plannedNotionalUsd, 0).toFixed(6));
+            
             const audit: PredictionAuditRecord = {
               id: predictionAuditId(target.id, best.marketId),
               createdAt: new Date().toISOString(),
@@ -1285,23 +1306,15 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             };
 
             const orders: PreparedOrder[] = plannedOrderEntries.flatMap((entry, index) => ([
-              {
-                target, label, symbol, best, side: "YES", orderPlanIndex: index, tokenId: best.yesTokenId,
-                limitPrice: entry.price, shareSize: entry.shareSize, entryRefPrice: best.yesPrice,
-              },
-              {
-                target, label, symbol, best, side: "NO", orderPlanIndex: index, tokenId: best.noTokenId,
-                limitPrice: entry.price, shareSize: entry.shareSize, entryRefPrice: best.noPrice,
-              },
+              { target, label, symbol, best, side: "YES", orderPlanIndex: index, tokenId: best.yesTokenId, limitPrice: entry.price, shareSize: entry.shareSize, entryRefPrice: best.yesPrice },
+              { target, label, symbol, best, side: "NO", orderPlanIndex: index, tokenId: best.noTokenId, limitPrice: entry.price, shareSize: entry.shareSize, entryRefPrice: best.noPrice }
             ]));
 
-            return { audit, best, orders, cycleLockUntilMs: cycleLockExpireMs(best.endDate) };
+            evaluations.push({ audit, best, orders, cycleLockUntilMs: cycleLockExpireMs(best.endDate) });
           } catch (err) {
             logError(`[${label}] evaluation error`, err instanceof Error ? err.message : err, "search-market");
-            return null;
           }
-        }));
-        evaluations.push(...results);
+        }
       }
 
       const readyEvaluations = evaluations.filter((x): x is PreparedEvaluation => Boolean(x));
@@ -1408,29 +1421,10 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         }
       }
 
-      // ── 实时价格监听 Token 更新 (每 10 次循环更新一次订阅列表以防频率过高) ──────
-      if (currentRuntime?.priceService && (Date.now() % 10000 < 1000)) {
-        const tokensToWatch: string[] = [];
-        hwrWatchMap.clear(); // 刷新映射，确保仅对当前最活跃的 HWR 目标响应
-        for (const target of activeTargets) {
-          try {
-            const markets = await gamma.getCandidateMarketsForTarget(target, 10);
-            const best = gamma.selectBestMarketForTarget(markets, target, new Date(), new Set());
-            if (best) {
-              console.log("best: ", best);
-              tokensToWatch.push(best.yesTokenId, best.noTokenId);
-              // 如果开启了 HWR，将盘口元数据缓存到 Map 中，供 WS 回调快速查阅
-              const mergedCfg = withTargetOverrides(cfg, target);
-              if (mergedCfg.hwrEnabled) {
-                hwrWatchMap.set(best.yesTokenId, { target, best, cfg: mergedCfg });
-                hwrWatchMap.set(best.noTokenId, { target, best, cfg: mergedCfg });
-              }
-            }
-          } catch { /* ignore */ }
-        }
-        if (tokensToWatch.length > 0) {
-          currentRuntime.priceService.watchTokens(tokensToWatch);
-        }
+      // ── 3. 实时价格监听 Token 更新备份 (可选逻辑已整合到 discovery 中) ──────────
+      // 目前 discovery 已经覆盖了watchTokens 的更新，这里主要做兜底或定期刷新
+      if (currentRuntime?.priceService && hwrWatchMap.size > 0 && (Date.now() % 60000 < 5000)) {
+        currentRuntime.priceService.watchTokens(Array.from(hwrWatchMap.keys()));
       }
 
     } catch (err) {
