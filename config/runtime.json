@@ -16,10 +16,10 @@
       ]
     },
     "hwr": {
-      "enabled": false,
+      "enabled": true,
       "triggerSeconds": 60,
-      "minPrice": 0.8,
-      "maxPrice": 0.9,
+      "minPrice": 0.9,
+      "maxPrice": 0.95,
       "fixedSizeUsd": 1
     },
     "targets": [

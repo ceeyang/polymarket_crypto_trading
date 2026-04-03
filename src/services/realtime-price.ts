@@ -23,6 +23,7 @@ export class RealtimePriceService {
   private connected = false;
   private reconnectTimer: any = null;
   private pingTimer: any = null;
+  public onPriceUpdate?: (price: TokenPrice) => void;
 
   constructor(private readonly config: Config) { }
 
@@ -144,17 +145,19 @@ export class RealtimePriceService {
         // Polymarket WS keeps alive with PING
         this.ws.ping();
       }
-    }, 20000);
+    }, 10000);
   }
 
   private handleMessage(data: string): void {
     try {
       const msg = JSON.parse(data);
+      console.log("handleMessage: ", msg);
 
       // 处理 book (初始快照) 或 best_bid_ask (实时更新) 或 price_change
       const eventType = msg?.event_type || msg?.type;
 
       if (eventType === "book" || eventType === "best_bid_ask" || eventType === "price_change") {
+        // console.log("handleMessage: ", msg);
         const tokenId = msg.asset_id;
         if (!tokenId) return;
 
@@ -185,6 +188,11 @@ export class RealtimePriceService {
           });
           if (isNew) {
             console.log(`[realtime-price] initially received price for ${tokenId}: Bid=${bid} Ask=${ask}`);
+          }
+
+          // 如果注册了回掉，则触发实时逻辑
+          if (this.onPriceUpdate) {
+            this.onPriceUpdate(this.prices.get(tokenId)!);
           }
         }
       }

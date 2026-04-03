@@ -873,19 +873,22 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
   const targetAnalysisLocks = new Map<string, number>();
   let runtime: RuntimeContext | null = null;
   let lastAutoClaimAtMs = 0;
-  
+
   // 高胜率模式已执行过的记录 (marketId -> true)
   const hwrEvaluatedMarkets = new Set<string>();
+
+  // 映射 TokenID -> 对应 HWR 执行所需的元数据，供 WebSocket 回调使用
+  const hwrWatchMap = new Map<string, { target: any, best: any, cfg: any }>();
   try {
     const claimFile = path.resolve("state", "last_claim.txt");
     lastAutoClaimAtMs = Number(fs.readFileSync(claimFile, "utf8").trim());
     if (!Number.isFinite(lastAutoClaimAtMs) || lastAutoClaimAtMs <= 0) {
       lastAutoClaimAtMs = Date.now();
-      try { fs.writeFileSync(claimFile, String(lastAutoClaimAtMs), "utf8"); } catch {}
+      try { fs.writeFileSync(claimFile, String(lastAutoClaimAtMs), "utf8"); } catch { }
     }
   } catch {
     lastAutoClaimAtMs = Date.now(); // 默认记录当前时间，避免启动立即触发
-    try { fs.writeFileSync(path.resolve("state", "last_claim.txt"), String(lastAutoClaimAtMs), "utf8"); } catch {}
+    try { fs.writeFileSync(path.resolve("state", "last_claim.txt"), String(lastAutoClaimAtMs), "utf8"); } catch { }
   }
   let autoClaimInFlight = false;
   let autoClaimRunSeq = 0;
@@ -1015,7 +1018,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
 
       // ── 异步对账逻辑（仅作为 WS 丢包时的补偿，每 60s 运行一次）──────────────────────
       if (!cfg.dryRun && (nowMs % 60000 < 5000)) {
-         const unresolvedTrades = (state.load().trades || [])
+        const unresolvedTrades = (state.load().trades || [])
           .filter(t => t.executionMode === "LIVE" && t.orderId && !t.resolved)
           .filter(t => !["FILLED", "MATCHED", "CLOSED", "CANCELED", "EXPIRED", "REJECTED"].includes(String(t.orderStatus).toUpperCase()))
           .slice(-20);
@@ -1073,7 +1076,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
           const runId = ++autoClaimRunSeq;
           autoClaimInFlight = true;
           lastAutoClaimAtMs = nowMs;
-          try { fs.writeFileSync(path.resolve("state", "last_claim.txt"), String(nowMs), "utf8"); } catch {}
+          try { fs.writeFileSync(path.resolve("state", "last_claim.txt"), String(nowMs), "utf8"); } catch { }
           const cfgForClaim = cfg;
           const startedAtMs = Date.now();
           logInfo("started", { runId, timeoutMs: AUTO_CLAIM_MAX_RUNTIME_MS }, "auto-claim");
@@ -1112,7 +1115,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
               }
             })
             .catch((err) => {
-              logError("error", err instanceof Error ? err.message : err, "auto-claim");
+              logError("auto-claim error", err instanceof Error ? err.message : err, "auto-claim");
             })
             .finally(() => {
               if (runId === autoClaimRunSeq) {
@@ -1135,61 +1138,48 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
         lastScanEnabled = scanEnabled;
       }
       if (!scanEnabled) {
+        // 当扫描被切断时，清空映射表，防止 WS 积累过期信号触发
+        hwrWatchMap.clear();
         continue;
       }
-      
-      // ── 高胜率模式 (HWR) 实时扫单逻辑 ─────────────────────────────────────
-      if (cfg.hwrEnabled) {
-        const tradesByMarket = state.load().trades || [];
-        for (const target of activeTargets) {
-          try {
-            // 获取当前该 Target 正在进行的 5m 盘口
-            const markets = await gamma.getCandidateMarketsForTarget(target, 100);
-            const best = gamma.selectBestMarketForTarget(markets, target, new Date(), new Set());
-            if (!best || hwrEvaluatedMarkets.has(best.marketId)) continue;
-            
-            // 检查倒计时 (hwrTriggerSeconds)
-            const endTimeMs = new Date(best.endDate).getTime();
-            const secondsToSettle = (endTimeMs - Date.now()) / 1000;
-            
-            if (secondsToSettle > 0 && secondsToSettle <= cfg.hwrTriggerSeconds) {
-              // 冲刺阶段，实时从 CLOB API 获取最新盘口价格 (极低延迟，规避 Rest 缓存)
-              const [yesBook, noBook] = await Promise.all([
-                trader.getMidPrice(best.yesTokenId),
-                trader.getMidPrice(best.noTokenId)
-              ]);
-              
-              const yesPx = yesBook.ask || best.yesPrice;
-              const noPx = noBook.ask || best.noPrice;
-              
-              const candidates = [
-                { side: "YES" as const, price: yesPx, tokenId: best.yesTokenId },
-                { side: "NO" as const, price: noPx, tokenId: best.noTokenId }
-              ];
-              
-              // 寻找价格在 [hwrMinPrice, hwrMaxPrice] 区间的一方
-              const winner = candidates.find(c => c.price >= cfg.hwrMinPrice && c.price <= cfg.hwrMaxPrice);
-              
-              if (winner) {
-                hwrEvaluatedMarkets.add(best.marketId);
-                const size = Number((cfg.hwrFixedSizeUsd / winner.price).toFixed(2));
-                
-                logInfo(`[HWR] Sprint trigger!`, { 
-                  marketId: best.marketId, 
-                  side: winner.side, 
-                  price: winner.price, 
-                  size,
-                  secondsToSettle: Math.round(secondsToSettle)
-                }, "high-win-rate");
 
-                const response = await trader.placeBuyOrder({
-                  tokenId: winner.tokenId,
-                  price: winner.price,
-                  size,
-                  tickSize: best.tickSize,
-                  negRisk: best.negRisk,
-                });
-                
+      // 注册/更新 WebSocket 实时下单回调 (每轮循环刷新以确保捕获最新的 runtime 上下文)
+      if (runtime?.priceService) {
+        const currentRuntime = runtime;
+        runtime.priceService.onPriceUpdate = (price) => {
+          const context = hwrWatchMap.get(price.tokenId);
+          if (!context) return;
+
+          // 重要：检查全局扫描开关，防止在界面关闭扫描后 WS 逻辑仍异步执行
+          const dynamicControl = readBotControlState();
+          const currentScanEnabled = controlMode === "STANDALONE" ? true : Boolean(dynamicControl.scanningEnabled);
+          if (!currentScanEnabled) return;
+
+          const { target, best, cfg: hwrCfg } = context;
+          if (hwrEvaluatedMarkets.has(best.marketId)) return;
+
+          const endTimeMs = new Date(best.endDate).getTime();
+          const secondsToSettle = (endTimeMs - Date.now()) / 1000;
+
+          if (secondsToSettle > 0 && secondsToSettle <= cfg.hwrTriggerSeconds) {
+            const currentPx = price.bestAsk || price.mid;
+            if (currentPx >= cfg.hwrMinPrice && currentPx <= cfg.hwrMaxPrice) {
+              hwrEvaluatedMarkets.add(best.marketId);
+
+              const size = Number((cfg.hwrFixedSizeUsd / currentPx).toFixed(2));
+              logInfo(`[HWR-WS] WebSocket Trigger Order!`, {
+                marketId: best.marketId,
+                px: currentPx,
+                size,
+              }, "high-win-rate");
+
+              currentRuntime.trader.placeBuyOrder({
+                tokenId: price.tokenId,
+                price: currentPx,
+                size,
+                tickSize: best.tickSize,
+                negRisk: best.negRisk,
+              }).then((response: any) => {
                 if (response?.orderID || response?.orderId || response?.id || response?.dryRun) {
                   state.recordTrade({
                     marketId: best.marketId,
@@ -1199,24 +1189,22 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
                     coin: target.coin,
                     horizonMin: target.horizonMin,
                     symbol: targetLabel(target),
-                    side: winner.side,
+                    side: price.tokenId === best.yesTokenId ? "YES" : "NO",
                     executionMode: cfg.dryRun ? "DRY_RUN" : "LIVE",
                     entryTime: new Date().toISOString(),
                     settleTime: best.endDate,
-                    entryRefPrice: winner.price,
-                    entryPrice: winner.price,
+                    entryRefPrice: currentPx,
+                    entryPrice: currentPx,
                     entryNotionalUsd: cfg.hwrFixedSizeUsd,
                     orderId: response?.orderId || response?.orderID || response?.id,
                     orderStatus: "OPEN",
                     strategyMeta: { mode: "HIGH_WIN_RATE_SPRINT" }
                   });
                 }
-              }
+              }).catch((e: any) => logError("HWR-WS error", e, "high-win-rate"));
             }
-          } catch (err) {
-             // 策略执行中的非致命错误
           }
-        }
+        };
       }
 
       const tradedMarketIds = state.getTradedMarketIds();
@@ -1235,6 +1223,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             if (targetAnalysisLocks.has(target.id)) return null;
 
             const markets = await gamma.getCandidateMarketsForTarget(target, 500);
+            console.log("markets: ", markets);
             const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
             if (!best) return null;
 
@@ -1420,29 +1409,37 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
       }
 
       // ── 实时价格监听 Token 更新 (每 10 次循环更新一次订阅列表以防频率过高) ──────
-      if (runtime?.priceService && (Date.now() % 10000 < 1000)) {
+      if (currentRuntime?.priceService && (Date.now() % 10000 < 1000)) {
         const tokensToWatch: string[] = [];
+        hwrWatchMap.clear(); // 刷新映射，确保仅对当前最活跃的 HWR 目标响应
         for (const target of activeTargets) {
           try {
-            // 简单发现逻辑：获取可能的 candidates 并 watch 它们的 Token
-            // 这样 websocket 就能持续收到这些盘口的推送
             const markets = await gamma.getCandidateMarketsForTarget(target, 10);
             const best = gamma.selectBestMarketForTarget(markets, target, new Date(), new Set());
             if (best) {
+              console.log("best: ", best);
               tokensToWatch.push(best.yesTokenId, best.noTokenId);
+              // 如果开启了 HWR，将盘口元数据缓存到 Map 中，供 WS 回调快速查阅
+              const mergedCfg = withTargetOverrides(cfg, target);
+              if (mergedCfg.hwrEnabled) {
+                hwrWatchMap.set(best.yesTokenId, { target, best, cfg: mergedCfg });
+                hwrWatchMap.set(best.noTokenId, { target, best, cfg: mergedCfg });
+              }
             }
           } catch { /* ignore */ }
         }
         if (tokensToWatch.length > 0) {
-          runtime.priceService.watchTokens(tokensToWatch);
+          currentRuntime.priceService.watchTokens(tokensToWatch);
         }
       }
 
     } catch (err) {
       logError("main loop error", err instanceof Error ? err.message : err, "system");
     } finally {
-      // 提升循环频率至 1s，以便精准匹配 5 分钟入场时刻
-      await sleep(1000);
+      // 尊重配置文件中的轮询间隔，不硬编码 1s
+      // 注意：使用 runtime 内部的 cfg 以解决作用域问题
+      const sleepSec = runtime?.cfg?.pollIntervalSec || 10;
+      await sleep(sleepSec * 1000);
     }
   }
 }

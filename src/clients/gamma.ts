@@ -5,7 +5,7 @@ import type { GammaMarket, SelectedMarket } from "../types.js";
 import { has1hHint, has15mHint, has5mHint, hasClockHint, hasEthKeyword, minutesUntil, parseJsonArray, toNum } from "../utils.js";
 
 export class GammaClient {
-  constructor(private readonly config: Config) {}
+  constructor(private readonly config: Config) { }
 
   async getCandidateMarkets(limit = 500, now = new Date()): Promise<GammaMarket[]> {
     const defaultTarget: MarketTarget = {

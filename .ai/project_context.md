@@ -5,8 +5,8 @@
 
 ## Current Phase
 - **Phase 1: Dual-Side Laddering (Implemented)**: 5m/15m/1h 周期的双边网格挂单。
-- **Phase 2: High Win-Rate Sprint (Implemented)**: 临近结算时的冲刺买入逻辑。
-- **Phase 3: Real-time Price Monitoring (In Progress/New)**: 引入 WebSocket 监听实时价格推送。
+- **Phase 2: High Win-Rate Sprint (Refined)**: 临近结算（如 60s）时，利用 WebSocket 实时价格在价格区间（如 0.95-0.99）进行“扫尾”冲刺买入。
+- **Phase 3: Real-time Price Monitoring (Implemented)**: 引入 WebSocket 监听。
 
 ## Core Tech Stack
 - **Language**: TypeScript (ESM)
