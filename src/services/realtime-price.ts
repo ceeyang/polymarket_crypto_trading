@@ -151,13 +151,11 @@ export class RealtimePriceService {
   private handleMessage(data: string): void {
     try {
       const msg = JSON.parse(data);
-      console.log("handleMessage: ", msg);
 
       // 处理 book (初始快照) 或 best_bid_ask (实时更新) 或 price_change
       const eventType = msg?.event_type || msg?.type;
 
       if (eventType === "book" || eventType === "best_bid_ask" || eventType === "price_change") {
-        // console.log("handleMessage: ", msg);
         const tokenId = msg.asset_id;
         if (!tokenId) return;
 

@@ -1163,23 +1163,33 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
 
           if (secondsToSettle > 0 && secondsToSettle <= cfg.hwrTriggerSeconds) {
             const currentPx = price.bestAsk || price.mid;
-            if (currentPx >= cfg.hwrMinPrice && currentPx <= cfg.hwrMaxPrice) {
+            if (currentPx >= hwrCfg.hwrMinPrice && currentPx <= hwrCfg.hwrMaxPrice) {
               hwrEvaluatedMarkets.add(best.marketId);
+              
+              const currentAsk = price.bestAsk || price.mid;
+              let size = Number((hwrCfg.hwrFixedSizeUsd / currentAsk).toFixed(2));
+              
+              // 满足平台最小下单份额要求 (通常为 5 份)
+              if (size < 5) {
+                size = 5;
+              }
 
-              const size = Number((cfg.hwrFixedSizeUsd / currentPx).toFixed(2));
               logInfo(`[HWR-WS] WebSocket Trigger Order!`, {
                 marketId: best.marketId,
-                px: currentPx,
+                side: price.tokenId === best.yesTokenId ? "YES" : "NO",
+                px: currentAsk,
                 size,
+                secsToEnd: Math.round(secondsToSettle)
               }, "high-win-rate");
 
               currentRuntime.trader.placeBuyOrder({
                 tokenId: price.tokenId,
-                price: currentPx,
+                price: currentAsk,
                 size,
                 tickSize: best.tickSize,
                 negRisk: best.negRisk,
               }).then((response: any) => {
+                logInfo("HWR-WS response", response, "high-win-rate");
                 if (response?.orderID || response?.orderId || response?.id || response?.dryRun) {
                   state.recordTrade({
                     marketId: best.marketId,
@@ -1190,12 +1200,12 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
                     horizonMin: target.horizonMin,
                     symbol: targetLabel(target),
                     side: price.tokenId === best.yesTokenId ? "YES" : "NO",
-                    executionMode: cfg.dryRun ? "DRY_RUN" : "LIVE",
+                    executionMode: hwrCfg.dryRun ? "DRY_RUN" : "LIVE",
                     entryTime: new Date().toISOString(),
                     settleTime: best.endDate,
-                    entryRefPrice: currentPx,
-                    entryPrice: currentPx,
-                    entryNotionalUsd: cfg.hwrFixedSizeUsd,
+                    entryRefPrice: currentAsk,
+                    entryPrice: currentAsk,
+                    entryNotionalUsd: Number((currentAsk * size).toFixed(6)),
                     orderId: response?.orderId || response?.orderID || response?.id,
                     orderStatus: "OPEN",
                     strategyMeta: { mode: "HIGH_WIN_RATE_SPRINT" }
@@ -1229,10 +1239,10 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
 
             const markets = await gamma.getCandidateMarketsForTarget(target, 50);
             const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
-            
+
             if (best) {
               targetDiscoveryMap.set(target.id, { best, target });
-              
+
               // 如果开启了 HWR，自动加入订阅列表并更新本地上下文
               const mergedCfg = withTargetOverrides(cfg, target);
               if (mergedCfg.hwrEnabled) {
@@ -1272,7 +1282,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             const orderEntries = mergedCfg.orderEntries
               .map((entry) => ({ price: Number(entry.price), shareSize: Number(entry.shareSize) }))
               .filter((entry) => Number.isFinite(entry.price) && entry.price > 0 && Number.isFinite(entry.shareSize) && entry.shareSize > 0);
-            
+
             if (!orderEntries.length) continue;
 
             const plannedOrderEntries = orderEntries.map((entry) => ({
@@ -1281,7 +1291,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
               plannedNotionalUsd: Number((entry.price * entry.shareSize).toFixed(6)),
             }));
             const plannedNotionalPerSideUsd = Number(plannedOrderEntries.reduce((sum, entry) => sum + entry.plannedNotionalUsd, 0).toFixed(6));
-            
+
             const audit: PredictionAuditRecord = {
               id: predictionAuditId(target.id, best.marketId),
               createdAt: new Date().toISOString(),

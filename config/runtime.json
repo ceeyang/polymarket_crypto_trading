@@ -3,7 +3,7 @@
     "dryRun": false,
     "pollIntervalSec": 20,
     "autoClaim": true,
-    "claimIntervalSec": 600
+    "claimIntervalSec": 300
   },
   "strategy": {
     "dualSide": {
@@ -19,7 +19,7 @@
       "enabled": true,
       "triggerSeconds": 60,
       "minPrice": 0.9,
-      "maxPrice": 0.95,
+      "maxPrice": 0.98,
       "fixedSizeUsd": 1
     },
     "targets": [
