@@ -365,7 +365,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   claimLog("fetching positions", { user });
   const { data } = await axios.get(`${cfg.dataApiHost}/positions`, {
-    params: { user, size: 20, redeemable: true, mergeable: true },
+    params: { user, size: 100, redeemable: true, sortBy: 'CURRENT' },
     timeout: 20000,
   });
 
@@ -376,9 +376,8 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     const isRedeemable = Boolean(p?.redeemable);
     const size = Number(p?.size ?? 0);
     const usd = extractClaimableUsd(p);
-    const curPrice = Number(p?.curPrice ?? 0);
-
-    if (isRedeemable && size > 0 && curPrice > 0) return true;
+    // 只要是可赎回且持仓大于 0 即可，不需要 curPrice > 0 (已结算盘口价格常为 0)
+    if (isRedeemable && size > 0) return true;
 
     if (isRedeemable && size <= 0) {
       claimLog("position skipped", {

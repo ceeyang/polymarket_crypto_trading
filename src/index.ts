@@ -1042,8 +1042,8 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
               cursor: liveSyncCursor,
             });
             liveSyncCursor = liveSync.nextCursor;
-            if (liveSync.updated > 0 || liveSync.canceled > 0 || liveSync.finalizedCanceled > 0 || liveSync.totalCandidates > LIVE_SYNC_MAX_CHECKS) {
-              logInfo("live order sync", liveSync, "cancel-stale");
+            if (liveSync.updated > 0 || liveSync.canceled > 0 || liveSync.finalizedCanceled > 0) {
+              logInfo("live order sync action", liveSync, "cancel-stale");
             }
 
             const official = await settleLiveTradesWithOfficial(cancelCfg, state, 0);
