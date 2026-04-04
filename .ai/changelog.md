@@ -1,13 +1,15 @@
 # Changelog
 
 ## [2026-04-04]
-### Refactor (Phase 4: Modularization)
-- **Full System Decoupling**: 将单体 `index.ts` 重构为 SOA 架构，核心逻辑分发至专用 Service。
-- **TradingEngine**: 创建了核心策略引擎，托管主循环、双边对冲与 WebSocket 异步逻辑。
-- **OrderService**: 统一了订单同步、撤单与官方结算对账逻辑。
-- **PositionService**: 集中了钱包地址解析与链上仓位追踪能力。
-- **Type Centralization**: 建立了单一来源的 `src/types.ts`。
-- **Cleanup**: 移除了主入口中的大量冗余局部逻辑，降低了代码复杂度。
+### Refactor (Phase 5: Web & CLI Modularization)
+- **Web Orchestrator Separation**: 将单体 `web.ts` 拆解为 `AuthService`, `AccountService`, `LogService`, `WebUtils` 和 `AppStatusService`。
+- **AccountService**: 集中处理资产统计、USDC 余额及仓位价值计算，并引入 8s 缓存以减轻 RPC/API 压力。
+- **AuthService**: 统一了 Web 端密码校验与会话存储逻辑。
+- **LogService**: 实现了异步 Append 逻辑与 Tail 处理，支持在 Web 端查看与清理运行日志。
+- **PositionService Enhancement**: 整合了活跃持仓与已平仓追踪，服务于 CLI `balance.ts` 与 Web 界面。
+- **CLI Cleanliness**: 重构 `balance.ts` 以调用 Service，移除了千行冗余的业务逻辑代码。
+
+### Refactor (Phase 4: Core Engine Modularization)
 
 ## [2026-04-03]
 ### Added

@@ -101,3 +101,18 @@ export async function fetchClosedPositionsMap(
 
   return { byCondition, byMarketId };
 }
+
+/**
+ * 获取活跃持仓列表
+ */
+export async function fetchActivePositions(cfg: Config, user: string): Promise<any[]> {
+  try {
+    const { data } = await axios.get(`${cfg.dataApiHost}/positions`, {
+      params: { user, size: 500 },
+      timeout: 15000,
+    });
+    return Array.isArray(data) ? data : (data?.data && Array.isArray(data.data) ? data.data : []);
+  } catch {
+    return [];
+  }
+}

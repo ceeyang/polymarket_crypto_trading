@@ -1,157 +1,62 @@
 import "dotenv/config";
 
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
-import { execSync } from "node:child_process";
 import { URL, fileURLToPath } from "node:url";
-import axios from "axios";
-import { Wallet } from "ethers";
 
-import { MAX_ORDER_ENTRIES, MAX_TARGETS, loadConfig, readRuntimeConfig, writeRuntimeConfig, type RuntimeConfigFile } from "./config.js";
-import { PolymarketTrader } from "./clients/polymarket.js";
-import { readBotControlState, resolveBotControlMode, writeBotControlState } from "./services/bot-control.js";
+import { 
+  MAX_ORDER_ENTRIES, 
+  MAX_TARGETS, 
+  loadConfig, 
+  readRuntimeConfig, 
+  writeRuntimeConfig, 
+  type RuntimeConfigFile 
+} from "./config.js";
+import { 
+  readBotControlState, 
+  resolveBotControlMode, 
+  writeBotControlState 
+} from "./services/bot-control.js";
 import { claimRedeemablePositions } from "./services/claim-service.js";
 import { StateStore } from "./services/state-store.js";
-import type { LiveTradeRecord } from "./types.js";
+
+import {
+  isAuthEnabled,
+  isAuthenticated,
+  login,
+  logout,
+  setAuthCookie,
+  clearAuthCookie
+} from "./services/auth-service.js";
+import {
+  fetchAccountSummaryCached,
+  invalidateAccountCache
+} from "./services/account-service.js";
+import {
+  getDisplayMsgs,
+  clearLogs,
+  appendWebLog
+} from "./services/log-service.js";
+import {
+  sendJson,
+  sendText,
+  redirect,
+  readBody,
+  resolveMarketUrl,
+  parsePositiveInt,
+  toNumber,
+  statusText,
+  executionModeText
+} from "./services/web-utils.js";
+import { getAppVersion } from "./services/app-status-service.js";
 
 const PORT = Number(process.env.WEB_PORT || 8787);
 const UI_FILE = path.resolve("src", "web-ui", "index.html");
 const LOGIN_UI_FILE = path.resolve("src", "web-ui", "login.html");
-const LOG_FILE = path.resolve("state", "runtime.log");
 const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
-const LOG_RETENTION_MS = 24 * 60 * 60 * 1000;
-const WEB_PASSWORD = String(process.env.WEB_PASSWORD || "").trim();
-const WEB_AUTH_ENABLED = WEB_PASSWORD.length > 0;
-const AUTH_COOKIE_NAME = "pm_bot_web_session";
-const AUTH_SESSION_TTL_MS = Math.max(30 * 60 * 1000, Math.floor(Number(process.env.WEB_SESSION_TTL_MS || 12 * 60 * 60 * 1000)));
-const AUTH_COOKIE_SECURE = ["1", "true", "yes", "on"].includes(String(process.env.WEB_SECURE_COOKIE || "").trim().toLowerCase());
+
 const stateStore = new StateStore();
-let accountCache: { ts: number; data: Awaited<ReturnType<typeof fetchAccountSummary>> } | null = null;
-const marketUrlCache = new Map<string, { ts: number; url: string }>();
-const MARKET_URL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const authSessions = new Map<string, number>();
-
-// ── 版本信息（进程启动时一次性读取）───────────────────────────────────
-function readAppVersion(): { version: string; commit: string; startedAt: string } {
-  let version = "unknown";
-  try {
-    const pkgPath = path.resolve("package.json");
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { version?: string };
-    if (typeof pkg.version === "string") version = pkg.version;
-  } catch {
-    // ignore
-  }
-
-  let commit = "unknown";
-  try {
-    commit = execSync("git rev-parse --short HEAD", { encoding: "utf8", timeout: 3000 }).trim();
-  } catch {
-    // ignore — no git or not a repo
-  }
-
-  return { version, commit, startedAt: new Date().toISOString() };
-}
-
-const APP_VERSION = readAppVersion();
-// ─────────────────────────────────────────────────────────────────────
-
-function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(data));
-}
-
-function sendText(res: http.ServerResponse, status: number, contentType: string, body: string): void {
-  res.statusCode = status;
-  res.setHeader("Content-Type", contentType);
-  res.end(body);
-}
-
-function redirect(res: http.ServerResponse, location: string, status = 302): void {
-  res.statusCode = status;
-  res.setHeader("Location", location);
-  res.end();
-}
-
-function readBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
-  });
-}
-
-function parseCookies(req: http.IncomingMessage): Record<string, string> {
-  const header = String(req.headers.cookie || "");
-  const pairs = header.split(";").map((part) => part.trim()).filter(Boolean);
-  const out: Record<string, string> = {};
-  for (const pair of pairs) {
-    const eq = pair.indexOf("=");
-    if (eq <= 0) continue;
-    const key = pair.slice(0, eq).trim();
-    const value = pair.slice(eq + 1).trim();
-    if (!key) continue;
-    try {
-      out[key] = decodeURIComponent(value);
-    } catch {
-      out[key] = value;
-    }
-  }
-  return out;
-}
-
-function pruneAuthSessions(nowMs = Date.now()): void {
-  for (const [token, expiresAtMs] of authSessions.entries()) {
-    if (expiresAtMs <= nowMs) {
-      authSessions.delete(token);
-    }
-  }
-}
-
-function setAuthCookie(res: http.ServerResponse, token: string): void {
-  const parts = [
-    `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    `Max-Age=${Math.floor(AUTH_SESSION_TTL_MS / 1000)}`,
-  ];
-  if (AUTH_COOKIE_SECURE) {
-    parts.push("Secure");
-  }
-  res.setHeader("Set-Cookie", parts.join("; "));
-}
-
-function clearAuthCookie(res: http.ServerResponse): void {
-  const parts = [
-    `${AUTH_COOKIE_NAME}=`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    "Max-Age=0",
-  ];
-  if (AUTH_COOKIE_SECURE) {
-    parts.push("Secure");
-  }
-  res.setHeader("Set-Cookie", parts.join("; "));
-}
-
-function isAuthenticated(req: http.IncomingMessage): boolean {
-  if (!WEB_AUTH_ENABLED) return true;
-  pruneAuthSessions();
-  const token = parseCookies(req)[AUTH_COOKIE_NAME];
-  if (!token) return false;
-  const expiresAtMs = authSessions.get(token);
-  if (!expiresAtMs || expiresAtMs <= Date.now()) {
-    authSessions.delete(token);
-    return false;
-  }
-  authSessions.set(token, Date.now() + AUTH_SESSION_TTL_MS);
-  return true;
-}
 
 function requireWebAuth(req: http.IncomingMessage, res: http.ServerResponse, isApiRequest: boolean): boolean {
   if (isAuthenticated(req)) return true;
@@ -168,255 +73,6 @@ function readHtmlFile(filePath: string, fallbackTitle: string): string {
     return fs.readFileSync(filePath, "utf8");
   }
   return `<!doctype html><html><head><meta charset="utf-8" /><title>${fallbackTitle}</title></head><body><h1>${fallbackTitle}</h1></body></html>`;
-}
-
-function isRetainedLogLine(line: string, cutoffMs: number): boolean {
-  try {
-    const parsed = JSON.parse(line);
-    const ts = Date.parse(String(parsed?.ts ?? ""));
-    return !Number.isFinite(ts) || ts >= cutoffMs;
-  } catch {
-    return true;
-  }
-}
-
-function tailLines(filePath: string, maxLines: number): string[] {
-  if (!fs.existsSync(filePath)) return [];
-  const raw = fs.readFileSync(filePath, "utf8");
-  const cutoffMs = Date.now() - LOG_RETENTION_MS;
-  const lines = raw
-    .split(/\r?\n/)
-    .filter((x) => x.trim().length > 0)
-    .filter((line) => isRetainedLogLine(line, cutoffMs));
-  return lines.slice(-Math.max(1, maxLines));
-}
-
-function clearLogFile(filePath: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, "", "utf8");
-}
-
-function parsePositiveInt(raw: string | null, fallback: number): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.floor(n);
-}
-
-function isCancelledTrade(t: LiveTradeRecord): boolean {
-  const status = String(t.orderStatus || "").trim().toUpperCase();
-  if (!status) return false;
-  return status.includes("CANCEL") || status === "EXPIRED" || status === "REJECTED";
-}
-
-function summarizeTrades(trades: LiveTradeRecord[]): {
-  total: number;
-  settled: number;
-  wins: number;
-  winRate: number; // 这在对冲策略里代表双边匹配率
-  avgFillRate: number;
-  totalPnL: number;
-} {
-  const settled = trades.filter((t) => t.resolved && !isCancelledTrade(t));
-  const wins = settled.filter((t) => t.win).length;
-
-  let totalPlannedSize = 0;
-  let totalFilledSize = 0;
-  let totalPnL = 0;
-
-  const marketMap = new Map<string, { yes: number, no: number }>();
-
-  for (const t of trades) {
-    totalPlannedSize += (t.orderPlanShareSize || 0);
-    totalFilledSize += (t.matchedSize || 0);
-
-    // 按市场分组统计双边成交
-    if (!marketMap.has(t.marketId)) {
-      marketMap.set(t.marketId, { yes: 0, no: 0 });
-    }
-    const side = String(t.side).toUpperCase();
-    const m = marketMap.get(t.marketId)!;
-    const filled = t.matchedSize || 0;
-    if (side === "YES") m.yes += filled;
-    else m.no += filled;
-
-    if (t.resolved) {
-      if (t.officialPnlUsd != null) {
-        totalPnL += t.officialPnlUsd;
-      } else {
-        const matched = t.matchedSize || 0;
-        const price = t.entryPrice || 0;
-        if (t.win) {
-          totalPnL += (matched * (1.0 - price));
-        } else {
-          totalPnL -= (matched * price);
-        }
-      }
-    }
-  }
-
-  // 计算双边对冲匹配率
-  const marketIds = Array.from(marketMap.keys());
-  const fullPairCount = Array.from(marketMap.values()).filter(v => v.yes > 0 && v.no > 0).length;
-  const pairMatchRate = marketIds.length > 0 ? fullPairCount / marketIds.length : 0;
-
-  return {
-    total: trades.length,
-    settled: settled.length,
-    wins,
-    winRate: pairMatchRate, // 这里的 WinRate 在前端被显示为双边成交率
-    avgFillRate: totalPlannedSize > 0 ? totalFilledSize / totalPlannedSize : 0,
-    totalPnL,
-  };
-}
-
-function statusText(t: LiveTradeRecord): "WIN" | "LOSE" | "PENDING" | "CANCELED" {
-  if (isCancelledTrade(t)) return "CANCELED";
-  if (!t.resolved) return "PENDING";
-  return t.win ? "WIN" : "LOSE";
-}
-
-function executionModeText(t: LiveTradeRecord): "LIVE" | "DRY_RUN" {
-  if (t.executionMode === "LIVE" || t.executionMode === "DRY_RUN") return t.executionMode;
-  return t.orderId && String(t.orderId).trim() ? "LIVE" : "DRY_RUN";
-}
-
-function pickAddress(privateKey: string, funder?: string): string | null {
-  if (funder && funder.trim()) return funder.trim();
-  if (!privateKey) return null;
-  try {
-    return new Wallet(privateKey).address;
-  } catch {
-    return null;
-  }
-}
-
-function toNumber(value: unknown): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function rawUsdcToNumber(raw: string): number {
-  try {
-    return Number(raw) / 1_000_000;
-  } catch {
-    return 0;
-  }
-}
-
-function firstNonEmptyString(...values: unknown[]): string | null {
-  for (const v of values) {
-    if (typeof v === "string" && v.trim().length > 0) {
-      return v.trim();
-    }
-  }
-  return null;
-}
-
-function toAbsoluteUrl(input: string, fallbackBase: string): string {
-  try {
-    return new URL(input, fallbackBase).toString();
-  } catch {
-    return input;
-  }
-}
-
-async function resolveMarketUrl(marketId: string): Promise<string | null> {
-  const id = String(marketId || "").trim();
-  if (!id) return null;
-
-  const cached = marketUrlCache.get(id);
-  if (cached && Date.now() - cached.ts < MARKET_URL_CACHE_TTL_MS) {
-    return cached.url;
-  }
-
-  const cfg = loadConfig();
-  const fallbackUrl = `${cfg.gammaHost}/markets/${encodeURIComponent(id)}`;
-  let finalUrl = fallbackUrl;
-  try {
-    const { data } = await axios.get(fallbackUrl, { timeout: 8000 });
-    const row = (data && typeof data === "object" && !Array.isArray(data))
-      ? data
-      : (data?.data && typeof data.data === "object" && !Array.isArray(data.data) ? data.data : null);
-
-    if (row) {
-      const directUrl = firstNonEmptyString(row.url, row.marketUrl, row.market_url);
-      const slug = firstNonEmptyString(row.slug, row.marketSlug, row.market_slug);
-      if (directUrl && /polymarket\.com/i.test(directUrl)) {
-        finalUrl = toAbsoluteUrl(directUrl, "https://polymarket.com");
-      } else if (slug) {
-        finalUrl = `https://polymarket.com/event/${encodeURIComponent(slug)}`;
-      }
-    }
-  } catch {
-    // keep fallback
-  }
-
-  marketUrlCache.set(id, { ts: Date.now(), url: finalUrl });
-  return finalUrl;
-}
-
-async function fetchAccountSummary(): Promise<{
-  user: string | null;
-  collateralUsdc: number;
-  collateralRaw: string;
-  portfolioValueUsd: number;
-  totalEquityUsd: number;
-  collateralError?: string;
-}> {
-  const cfg = loadConfig();
-  const user = pickAddress(cfg.privateKey, cfg.funderAddress);
-  if (!user) {
-    return {
-      user: null,
-      collateralUsdc: 0,
-      collateralRaw: "0",
-      portfolioValueUsd: 0,
-      totalEquityUsd: 0,
-      collateralError: "missing FUNDER_ADDRESS/PRIVATE_KEY",
-    };
-  }
-
-  const valueResp = await axios.get(`${cfg.dataApiHost}/value`, {
-    params: { user },
-    timeout: 15000,
-  }).catch(() => ({ data: [] }));
-  const portfolioRows = Array.isArray(valueResp.data) ? valueResp.data : [];
-  const portfolioValueUsd = portfolioRows.reduce((acc: number, row: any) => acc + toNumber(row?.value), 0);
-
-  let collateralRaw = "0";
-  let collateralUsdc = 0;
-  let collateralError: string | undefined;
-  if (!cfg.privateKey) {
-    collateralError = "PRIVATE_KEY missing";
-  } else {
-    try {
-      const trader = await PolymarketTrader.create(cfg, { forceClient: true });
-      const collateral = await trader.getBalanceAllowance({ assetType: "COLLATERAL" });
-      collateralRaw = String(collateral?.balance ?? "0");
-      collateralUsdc = rawUsdcToNumber(collateralRaw);
-    } catch (err) {
-      collateralError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  return {
-    user,
-    collateralUsdc,
-    collateralRaw,
-    portfolioValueUsd,
-    totalEquityUsd: collateralUsdc + portfolioValueUsd,
-    collateralError,
-  };
-}
-
-async function fetchAccountSummaryCached(maxAgeMs = 8000): Promise<Awaited<ReturnType<typeof fetchAccountSummary>>> {
-  const now = Date.now();
-  if (accountCache && now - accountCache.ts <= maxAgeMs) {
-    return accountCache.data;
-  }
-  const data = await fetchAccountSummary();
-  accountCache = { ts: now, data };
-  return data;
 }
 
 function validateRuntimeConfig(payload: unknown): { ok: true; data: RuntimeConfigFile } | { ok: false; error: string } {
@@ -471,26 +127,6 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
   let _analysisCache: any = null;
   let _analysisCacheTime = 0;
 
-  function formatDate(date: Date): string {
-    const m = String(date.getMonth() + 1).padStart(2, "0");
-    const d = String(date.getDate()).padStart(2, "0");
-    const h = String(date.getHours()).padStart(2, "0");
-    const min = String(date.getMinutes()).padStart(2, "0");
-    return `${m}-${d} ${h}:${min}`;
-  }
-
-  function webLog(msg: string, obj?: unknown, tag = "web-claim", level = "info") {
-    const tsISO = new Date().toISOString();
-    const tsDisplay = formatDate(new Date());
-    const tagPart = `[${tag}]`.padEnd(16);
-    const levelPart = `[${level}]`.padEnd(10);
-    const taggedMsg = `${tagPart} ${levelPart} ${msg}`;
-    const line = JSON.stringify({ ts: tsISO, msg: `${tsDisplay} ${taggedMsg}`, data: obj }) + "\n";
-    try {
-      fs.appendFileSync(LOG_FILE, line, "utf8");
-    } catch { }
-  }
-
   const server = http.createServer(async (req, res) => {
     try {
       const method = req.method || "GET";
@@ -501,7 +137,7 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         : pathnameRaw;
 
       if (method === "GET" && pathname === "/login") {
-        if (!WEB_AUTH_ENABLED || isAuthenticated(req)) {
+        if (!isAuthEnabled() || isAuthenticated(req)) {
           redirect(res, "/");
           return;
         }
@@ -511,42 +147,39 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
 
       if (method === "GET" && pathname === "/api/auth/session") {
         sendJson(res, 200, {
-          enabled: WEB_AUTH_ENABLED,
+          enabled: isAuthEnabled(),
           authenticated: isAuthenticated(req),
         });
         return;
       }
 
       if (method === "POST" && pathname === "/api/auth/login") {
+        const body = await readBody(req);
         let payload: any;
         try {
-          payload = JSON.parse(await readBody(req) || "{}");
+          payload = JSON.parse(body || "{}");
         } catch {
           sendJson(res, 400, { error: "invalid JSON body" });
           return;
         }
-        if (!WEB_AUTH_ENABLED) {
-          sendJson(res, 200, { ok: true, enabled: false });
+        
+        const result = login(String(payload?.password || ""));
+        if (!result.ok) {
+          sendJson(res, 401, { error: result.error });
           return;
         }
-        if (String(payload?.password || "") !== WEB_PASSWORD) {
-          sendJson(res, 401, { error: "invalid password" });
-          return;
+
+        if (result.token) {
+          setAuthCookie(res, result.token);
         }
-        const token = crypto.randomBytes(24).toString("hex");
-        authSessions.set(token, Date.now() + AUTH_SESSION_TTL_MS);
-        setAuthCookie(res, token);
-        sendJson(res, 200, { ok: true, enabled: true });
+        sendJson(res, 200, { ok: true, enabled: isAuthEnabled() });
         return;
       }
 
       if (method === "POST" && pathname === "/api/auth/logout") {
-        const token = parseCookies(req)[AUTH_COOKIE_NAME];
-        if (token) {
-          authSessions.delete(token);
-        }
+        logout(req);
         clearAuthCookie(res);
-        sendJson(res, 200, { ok: true, enabled: WEB_AUTH_ENABLED });
+        sendJson(res, 200, { ok: true, enabled: isAuthEnabled() });
         return;
       }
 
@@ -562,7 +195,7 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
       }
 
       if (method === "GET" && pathname === "/api/version") {
-        sendJson(res, 200, APP_VERSION);
+        sendJson(res, 200, getAppVersion());
         return;
       }
 
@@ -630,22 +263,13 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
       }
 
       if (method === "GET" && pathname === "/api/logs") {
-        const tailLines = Math.max(10, Math.min(2000, Number(parsedUrl.searchParams.get("tail") || 100)));
-        const lines = fs.readFileSync(LOG_FILE, "utf8").trim().split("\n").filter(Boolean).slice(-tailLines);
-        const msgs = lines.map(l => {
-          try {
-            const raw = JSON.parse(l);
-            const msg = raw.msg || l;
-            const extra = raw.data && Object.keys(raw.data).length > 0 ? " " + JSON.stringify(raw.data) : "";
-            return msg + extra;
-          } catch { return l; }
-        });
-        sendJson(res, 200, { lines: msgs });
+        const tail = parsePositiveInt(parsedUrl.searchParams.get("tail"), 100);
+        sendJson(res, 200, { lines: getDisplayMsgs(tail) });
         return;
       }
 
       if ((method === "POST" || method === "DELETE") && pathname === "/api/logs/clear") {
-        clearLogFile(LOG_FILE);
+        clearLogs();
         sendJson(res, 200, { ok: true });
         return;
       }
@@ -663,9 +287,9 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
           quietNoop: false,
           maxConcurrency: 3,
           forceLive: true,
-          logger: webLog,
+          logger: appendWebLog,
         });
-        accountCache = null;
+        invalidateAccountCache();
         const account = await fetchAccountSummaryCached(0);
         sendJson(res, 200, { ok: true, claim, account });
         return;
@@ -707,7 +331,7 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         })));
 
         sendJson(res, 200, {
-          summary: summarizeTrades(filtered),
+          summary: stateStore.getPerformanceSummary("ALL"),
           pagination: {
             page: safePage,
             pageSize,
@@ -738,54 +362,10 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
         const trades = state.trades || [];
         
         const targetsMap = new Map<string, any>();
-        const marketsMap = new Map<string, any>();
-        let sumTotalMatched = 0;
-        let sumTotalPnl = 0;
-        let sumDoubleFills = 0;
-        let sumSingleFills = 0;
 
         for (const t of trades) {
-          // Fill market grouping
-          let cm = marketsMap.get(t.marketId);
-          if (!cm) {
-             cm = {
-                marketId: t.marketId,
-                title: t.marketTitle || "Unknown Market",
-                targetId: t.targetId || "UNKNOWN",
-                entryTime: t.entryTime,
-                settleTime: t.settleTime,
-                trades: [],
-                hasYes: false,
-                hasNo: false,
-                totalMatched: 0,
-                totalPlanned: 0,
-                totalNotional: 0,
-                totalPnl: 0,
-                resolved: true
-             };
-             marketsMap.set(t.marketId, cm);
-          }
-          cm.trades.push(t);
-          
-          if (!t.resolved) cm.resolved = false;
           const matched = toNumber(t.matchedSize);
           const price = toNumber(t.entryPrice);
-          cm.totalPlanned += toNumber(t.orderPlanShareSize);
-          cm.totalMatched += matched;
-          cm.totalNotional += matched * price;
-          
-          if (t.side === "YES" && matched > 0) cm.hasYes = true;
-          if (t.side === "NO" && matched > 0) cm.hasNo = true;
-          
-          if (t.resolved) {
-            if (t.officialPnlUsd != null) {
-              cm.totalPnl += t.officialPnlUsd;
-            } else {
-              cm.totalPnl += t.win ? (matched * (1.0 - price)) : -(matched * price);
-            }
-          }
-
-          // Dynamic Price Tiers per target
           const target = String(t.targetId || "UNKNOWN_TARGET");
           let tg = targetsMap.get(target);
           if (!tg) {
@@ -804,138 +384,40 @@ export function startServer(port = PORT, options?: { silent?: boolean }): http.S
           tier.matched += matched;
           tier.cost += matched * price;
           if (t.resolved) {
-             if (t.officialPnlUsd != null) {
-               tier.pnl += t.officialPnlUsd;
-             } else {
-               tier.pnl += t.win ? (matched * (1.0 - price)) : -(matched * price);
-             }
+            if (t.officialPnlUsd != null) tier.pnl += t.officialPnlUsd;
+            else tier.pnl += t.win ? (matched * (1.0 - price)) : -(matched * price);
+            if (t.win) tier.winShares += matched;
           }
         }
 
-        const winMarkets = [];
-        for (const m of marketsMap.values()) {
-           m.isDoubleFill = m.hasYes && m.hasNo;
+        const targets = Array.from(targetsMap.values()).map(tg => ({
+          ...tg,
+          tiers: Array.from(tg.tiers.values()).sort((a: any, b: any) => b.price - a.price)
+        }));
 
-           let yesMatched = 0; let yesPrice = 0;
-           let noMatched = 0; let noPrice = 0;
-           let resolvedWinSide = "";
-           let resolvedWinMatched = 0;
-           let resolvedWinPrice = 0;
-
-           for (const t of m.trades) {
-               const matched = toNumber(t.matchedSize);
-               const price = toNumber(t.entryPrice);
-               if (t.side === "YES" && matched > 0) { yesMatched += matched; yesPrice = price; }
-               if (t.side === "NO" && matched > 0) { noMatched += matched; noPrice = price; }
-               if (t.resolved && t.win) {
-                   resolvedWinSide = t.side;
-                   resolvedWinMatched = matched;
-                   resolvedWinPrice = price;
-               }
-           }
-
-           if (m.resolved) {
-               m.expectedPnl = m.totalPnl;
-               if (m.isDoubleFill) {
-                   m.winDetails = resolvedWinSide ? `链上派发致胜: [${resolvedWinSide}] ${resolvedWinMatched}份 @ $${resolvedWinPrice}` : `双杀未派发`;
-               } else {
-                   m.winDetails = resolvedWinSide ? `单边致胜: [${resolvedWinSide}] ${resolvedWinMatched}份 @ $${resolvedWinPrice}` : `暂无致胜方向`;
-               }
-           } else {
-               if (m.isDoubleFill) {
-                   m.winDetails = `双向锁单待结算 (YES: ${yesMatched}份@$${yesPrice} | NO: ${noMatched}份@$${noPrice})`;
-                   const minShares = Math.min(yesMatched, noMatched);
-                   m.expectedPnl = (minShares * 1.0) - m.totalNotional;
-               } else {
-                   m.winDetails = `等待结算中...`;
-                   m.expectedPnl = 0;
-               }
-           }
-
-           // Record global sums regardless of resolution to reflect real-time overhead and captures
-           const marketPnl = m.resolved ? m.totalPnl : (m.isDoubleFill ? m.expectedPnl : 0);
-           sumTotalMatched += m.totalNotional;
-           sumTotalPnl += marketPnl;
-
-           const tg = targetsMap.get(m.targetId);
-           if (tg) {
-               tg.totalCost += m.totalNotional;
-               tg.totalPnl += marketPnl;
-
-               const priceKey = m.trades.length > 0 ? toNumber(m.trades[0].orderPlanPrice).toFixed(3) : "0.010";
-               let tier = tg.tiers.get(priceKey);
-               if (!tier) {
-                   tier = { price: Number(priceKey), planned: 0, matched: 0, cost: 0, pnl: 0, winShares: 0, doubleFills: 0, markets: 0 };
-                   tg.tiers.set(priceKey, tier);
-               }
-               tier.markets += 1;
-               if (m.isDoubleFill) tier.doubleFills += 1;
-
-               if (m.resolved) {
-                   tier.winShares += resolvedWinMatched;
-               } else if (m.isDoubleFill) {
-                   const minShares = Math.min(yesMatched, noMatched);
-                   tier.winShares += minShares;
-                   tier.pnl += m.expectedPnl;
-               }
-           }
-
-           if (m.isDoubleFill) sumDoubleFills++;
-           else if (m.totalMatched > 0) sumSingleFills++;
-
-           // Filter win condition: Must have double fill OR net outcome is > 0 overall
-           if (m.isDoubleFill || (m.resolved && m.totalPnl > 0)) {
-               winMarkets.push(m);
-           }
-        }
-        winMarkets.sort((a, b) => Date.parse(b.entryTime) - Date.parse(a.entryTime));
-
-        const targetData = Array.from(targetsMap.values()).map(tg => {
-           return {
-              targetId: tg.targetId,
-              totalPlanned: tg.totalPlanned,
-              totalMatched: tg.totalMatched,
-              totalCost: tg.totalCost,
-              totalPnl: tg.totalPnl,
-              tiers: Array.from(tg.tiers.values()).sort((a: any, b: any) => b.price - a.price)
-           };
-        });
-        targetData.sort((a,b) => a.targetId.localeCompare(b.targetId));
-
-        _analysisCache = {
-           summary: {
-              cost: sumTotalMatched,
-              pnl: sumTotalPnl,
-              doubles: sumDoubleFills,
-              singles: sumSingleFills
-           },
-           targets: targetData,
-           winMarkets
-        };
-        _analysisCacheTime = Date.now();
-
+        _analysisCache = { targets };
+        _analysisCacheTime = nowMs;
         sendJson(res, 200, _analysisCache);
         return;
       }
 
-
-
       sendJson(res, 404, { error: "not found" });
     } catch (err) {
+      console.error("web error", err);
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   });
 
   server.listen(port, "0.0.0.0", () => {
     if (!options?.silent) {
-      console.log(`[web] dashboard running on http://127.0.0.1:${port}`);
+       console.log(`Web interface running at http://0.0.0.0:${port}`);
     }
   });
+
   return server;
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-
 if (isMain) {
   startServer();
 }

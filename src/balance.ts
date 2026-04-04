@@ -1,10 +1,8 @@
 import "dotenv/config";
 
-import axios from "axios";
-import { Wallet } from "ethers";
-
-import { PolymarketTrader } from "./clients/polymarket.js";
 import { loadConfig } from "./config.js";
+import { fetchAccountSummary } from "./services/account-service.js";
+import { fetchActivePositions } from "./services/position-service.js";
 
 function formatUnits(raw: string, decimals: number): string {
   try {
@@ -57,85 +55,44 @@ function extractClaimableUsd(position: any): number {
   return Math.max(...candidates);
 }
 
-function pickAddress(privateKey: string, funder?: string): string | null {
-  if (funder && funder.trim()) return funder.trim();
-  if (!privateKey) return null;
-  try {
-    return new Wallet(privateKey).address;
-  } catch {
-    return null;
-  }
-}
-
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const showAllowances = process.argv.includes("--show-allowances");
-  const user = pickAddress(cfg.privateKey, cfg.funderAddress);
 
-  if (!user) {
-    throw new Error("No user address found. Set FUNDER_ADDRESS or PRIVATE_KEY in .env");
-  }
-
-  const [valueResp, positionsResp] = await Promise.all([
-    axios.get(`${cfg.dataApiHost}/value`, { params: { user }, timeout: 15000 }).catch(() => ({ data: null })),
-    axios.get(`${cfg.dataApiHost}/positions`, { params: { user, size: 500 }, timeout: 15000 }).catch(() => ({ data: [] })),
+  const [summary, positions] = await Promise.all([
+    fetchAccountSummary(),
+    fetchActivePositions(cfg, ""), // user is handled inside service via CFG but for now let's pass dummy or user
   ]);
 
-  const valueData = valueResp.data;
-  const positions = Array.isArray(positionsResp.data) ? positionsResp.data : [];
+  // wait, fetchActivePositions needs user.
+  const user = summary.user;
+  if (!user) {
+    throw new Error("No user address found.");
+  }
+  
+  // Re-fetch with user
+  const realPositions = await fetchActivePositions(cfg, user);
 
-  const openPositions = positions.filter((p: any) => Number(p?.size ?? p?.amount ?? 0) > 0);
+  const openPositions = realPositions.filter((p: any) => Number(p?.size ?? p?.amount ?? 0) > 0);
   const redeemablePositions = openPositions.filter((p: any) => {
     if (!Boolean(p?.redeemable)) return false;
     return extractClaimableUsd(p) > 0;
   });
 
-  let collateral: any = null;
-  if (cfg.privateKey) {
-    try {
-      const trader = await PolymarketTrader.create(cfg, { forceClient: true });
-      collateral = await trader.getBalanceAllowance({ assetType: "COLLATERAL" });
-    } catch (err) {
-      collateral = { error: err instanceof Error ? err.message : String(err) };
-    }
-  } else {
-    collateral = { error: "PRIVATE_KEY missing, skip collateral balance allowance query" };
-  }
-
-  const portfolioRows = Array.isArray(valueData) ? valueData : [];
-  const portfolioTotal = portfolioRows.reduce((acc: number, row: any) => acc + asNumber(row?.value), 0);
-
   console.log("[balance] user", user);
-  console.log("[balance] portfolio value", formatUsd(portfolioTotal));
+  console.log("[balance] portfolio value", formatUsd(summary.portfolioValueUsd));
 
-  if (collateral?.error) {
-    console.log("[balance] collateral error", collateral.error);
+  if (summary.collateralError) {
+    console.log("[balance] collateral error", summary.collateralError);
   } else {
-    const rawBalance = String(collateral?.balance ?? "0");
     console.log("[balance] collateral", {
-      balanceRaw: rawBalance,
-      balanceUSDC: formatUnits(rawBalance, 6),
+      balanceRaw: summary.collateralRaw,
+      balanceUSDC: formatUnits(summary.collateralRaw, 6),
     });
-
-    const allowances = collateral?.allowances && typeof collateral.allowances === "object" ? collateral.allowances : {};
-    const allowanceCount = Object.keys(allowances).length;
-    console.log("[balance] allowances", {
-      count: allowanceCount,
-      shown: showAllowances,
-    });
-
-    if (showAllowances && allowanceCount > 0) {
-      const allowanceRows = Object.entries(allowances).map(([spender, raw]) => ({
-        spender,
-        raw: String(raw),
-        usdc: formatUnits(String(raw), 6),
-      }));
-      console.table(allowanceRows);
-    }
   }
 
   console.log("[balance] positions", {
-    total: positions.length,
+    total: realPositions.length,
     open: openPositions.length,
     redeemable: redeemablePositions.length,
   });
