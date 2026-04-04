@@ -360,40 +360,16 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     }
   };
 
-  claimLog("fetching positions", { user });
   const { data } = await axios.get(`${cfg.dataApiHost}/positions`, {
-    params: { user, size: 100, redeemable: true, sortBy: 'CURRENT' },
+    params: { user, size: 200, redeemable: true, sortBy: 'CURRENT' },
     timeout: 20000,
   });
 
   const positions = Array.isArray(data) ? data : [];
   claimLog("raw positions found", { count: positions.length });
 
-  const redeemable = positions.filter((p: any) => {
-    const isRedeemable = Boolean(p?.redeemable);
-    const size = Number(p?.size ?? 0);
-    const usd = extractClaimableUsd(p);
-    // 只要是可赎回且持仓大于 0 即可，不需要 curPrice > 0 (已结算盘口价格常为 0)
-    if (isRedeemable && size > 0) return true;
-
-    if (isRedeemable && size <= 0) {
-      claimLog("position skipped", {
-        conditionId: p?.conditionId,
-        size,
-        usd,
-        reason: "size <= 0"
-      }, "warn");
-    }
-    return false;
-  });
-
-  claimLog("filter results", {
-    rawCount: positions.length,
-    redeemableCount: redeemable.length,
-  });
-
   const whitelist = new Set((options?.conditionIds ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean));
-  const actionablePositions = redeemable.filter((p: any) => {
+  const actionablePositions = positions.filter((p: any) => {
     const cid = normalizeConditionId(p?.conditionId);
     if (!cid) return false;
     if (whitelist.size && !whitelist.has(cid.toLowerCase())) return false;
@@ -411,7 +387,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   const totalConditions = conditionIds.length;
   claimLog("selection summary", {
     raw: positions.length,
-    redeemable: redeemable.length,
+    redeemable: positions.length,
     actionable: totalConditions,
     whitelistActive: whitelist.size > 0
   });
@@ -419,7 +395,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
   if (totalConditions === 0) {
     return {
       user,
-      redeemablePositions: redeemable.length,
+      redeemablePositions: positions.length,
       conditions: 0,
       success: 0,
       failed: 0,
@@ -450,7 +426,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
     claimLog("dry-run conditionIds", conditionIds);
     return {
       user,
-      redeemablePositions: redeemable.length,
+      redeemablePositions: positions.length,
       conditions: totalConditions,
       success: 0,
       failed: 0,
@@ -491,7 +467,7 @@ export async function claimRedeemablePositions(cfg: Config, options?: ClaimRunOp
 
   return {
     user,
-    redeemablePositions: redeemable.length,
+    redeemablePositions: positions.length,
     conditions: totalConditions,
     success,
     failed,

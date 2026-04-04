@@ -59,22 +59,23 @@ export function resolveBotControlMode(raw: string | undefined): BotControlMode {
   return "STANDALONE";
 }
 
-const CONFIG_KEY_FILE = path.resolve("state", "config.key");
-const RELOAD_TOKEN_FILE = path.resolve("state", "config.reload.token");
+const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
+const RUNTIME_CONFIG_PATH = path.resolve("config", "runtime.json");
 
 export function readConfigKey(): string {
   try {
-    if (!fs.existsSync(CONFIG_KEY_FILE)) return "default";
-    return fs.readFileSync(CONFIG_KEY_FILE, "utf8").trim() || "default";
+    if (!fs.existsSync(RUNTIME_CONFIG_PATH)) return "none";
+    const stat = fs.statSync(RUNTIME_CONFIG_PATH);
+    return `${stat.mtimeMs}_${stat.size}`;
   } catch {
-    return "default";
+    return "error";
   }
 }
 
 export function readReloadToken(): number {
   try {
-    if (!fs.existsSync(RELOAD_TOKEN_FILE)) return 0;
-    const raw = fs.readFileSync(RELOAD_TOKEN_FILE, "utf8").trim();
+    if (!fs.existsSync(RELOAD_SIGNAL_FILE)) return 0;
+    const raw = fs.readFileSync(RELOAD_SIGNAL_FILE, "utf8").trim();
     const n = Number(raw);
     return Number.isFinite(n) ? n : 0;
   } catch {

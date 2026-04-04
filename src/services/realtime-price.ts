@@ -52,19 +52,33 @@ export class RealtimePriceService {
   }
 
   /**
-   * 添加需要监听的 Token
+   * 更新需要监听的 Token 列表（全量对齐）
    */
-  watchTokens(tokenIds: string[]): void {
-    const newIds = tokenIds.filter(id => id && !this.watchedTokenIds.has(id));
-    if (newIds.length === 0) return;
+  updateWatchedTokens(tokenIds: string[]): void {
+    const nextIds = new Set(tokenIds.filter(Boolean));
+    const toAdd = Array.from(nextIds).filter(id => !this.watchedTokenIds.has(id));
+    const toRemove = Array.from(this.watchedTokenIds).filter(id => !nextIds.has(id));
 
-    for (const id of newIds) {
-      this.watchedTokenIds.add(id);
+    if (toAdd.length === 0 && toRemove.length === 0) return;
+
+    // 更新内存状态
+    for (const id of toAdd) this.watchedTokenIds.add(id);
+    for (const id of toRemove) {
+      this.watchedTokenIds.delete(id);
+      this.prices.delete(id); // 同时清理过时价格缓存
     }
 
     if (this.connected && this.ws) {
-      this.subscribe(newIds);
+      if (toAdd.length > 0) this.sendSubscription(toAdd, "subscribe");
+      if (toRemove.length > 0) this.sendSubscription(toRemove, "unsubscribe");
     }
+  }
+
+  /**
+   * 兼容旧版：添加需要监听的 Token
+   */
+  watchTokens(tokenIds: string[]): void {
+    this.updateWatchedTokens(Array.from(new Set([...Array.from(this.watchedTokenIds), ...tokenIds])));
   }
 
   /**
@@ -160,6 +174,9 @@ export class RealtimePriceService {
         const tokenId = msg.asset_id;
         if (!tokenId) return;
 
+        // Verify we are watching this token
+        if (!this.watchedTokenIds.has(tokenId)) return;
+
         let bid = 0;
         let ask = 0;
 
@@ -187,6 +204,10 @@ export class RealtimePriceService {
           });
           if (isNew) {
             logInfo(`initially received price for ${tokenId}: Bid=${bid} Ask=${ask}`, undefined, "realtime-price");
+          } else {
+            // Low-frequency heartbeat: log if price actually changed or every N updates
+            // (Here we log all to help user debug, but only for watched tokens)
+            // logInfo(`price update [${tokenId}]: ${bid} / ${ask}`, undefined, "realtime-price");
           }
 
           // 如果注册了回掉，则触发实时逻辑
@@ -203,25 +224,22 @@ export class RealtimePriceService {
   private resubscribeAll(): void {
     const ids = Array.from(this.watchedTokenIds);
     if (ids.length > 0) {
-      this.subscribe(ids);
+      this.sendSubscription(ids, "subscribe");
     }
   }
 
-  private subscribe(tokenIds: string[]): void {
+  private sendSubscription(tokenIds: string[], type: "subscribe" | "unsubscribe"): void {
     if (!this.ws || !this.connected) return;
 
     // 根据官方文档 Market Channel 订阅格式:
-    // { "assets_ids": [...], "type": "market", "custom_feature_enabled": true }
-    // 注意：有些文档说用 "type": "subscribe", "topic": "market"
-    // 我们尝试发送这种标准格式
     const payload = JSON.stringify({
-      type: "subscribe",
+      type,
       topic: "market",
       assets_ids: tokenIds,
       custom_feature_enabled: true
     });
 
     this.ws.send(payload);
-    logInfo(`subscribed to market channel for ${tokenIds.length} tokens`, undefined, "realtime-price");
+    logInfo(`${type}d to market channel for ${tokenIds.length} tokens`, { tokens: tokenIds }, "realtime-price");
   }
 }

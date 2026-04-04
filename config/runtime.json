@@ -17,8 +17,8 @@
     },
     "hwr": {
       "enabled": true,
-      "triggerSeconds": 30,
-      "minPrice": 0.95,
+      "triggerSeconds": 10,
+      "minPrice": 0.8,
       "maxPrice": 0.99,
       "fixedSizeUsd": 1
     },
@@ -67,7 +67,7 @@
       },
       {
         "id": "SOL_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "SOL",
         "horizonMin": 5,
         "symbol": "SOLUSDT"
@@ -88,7 +88,7 @@
       },
       {
         "id": "XRP_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "XRP",
         "horizonMin": 5,
         "symbol": "XRPUSDT"
@@ -109,7 +109,7 @@
       },
       {
         "id": "DOGE_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "DOGE",
         "horizonMin": 5,
         "symbol": "DOGEUSDT"
@@ -130,7 +130,7 @@
       },
       {
         "id": "BNB_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "BNB",
         "horizonMin": 5,
         "symbol": "BNBUSDT"
@@ -151,7 +151,7 @@
       },
       {
         "id": "HYPE_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "HYPE",
         "horizonMin": 5,
         "symbol": "HYPEUSDT"

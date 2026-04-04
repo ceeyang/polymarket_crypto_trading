@@ -71,6 +71,7 @@ export class TradingEngine {
   private hwrEvaluatedMarkets = new Set<string>();
   private hwrWatchMap = new Map<string, { target: any, best: any, cfg: any }>();
   private lastSummaryKey = "";
+  private hwrLogThrottle = new Set<string>();
 
   constructor(
     private readonly state: StateStore,
@@ -274,8 +275,16 @@ export class TradingEngine {
           logError(`[${targetLabel(target)}] discovery error`, err instanceof Error ? err.message : err, "search-market");
         }
       }
-      if (tokensToWatch.length > 0 && runtime.priceService) {
-        runtime.priceService.watchTokens(tokensToWatch);
+      if (runtime.priceService) {
+        runtime.priceService.updateWatchedTokens(tokensToWatch);
+        
+        // 清理 hwrWatchMap 中不再需要的 Token
+        const currentTokenSet = new Set(tokensToWatch);
+        for (const tid of this.hwrWatchMap.keys()) {
+          if (!currentTokenSet.has(tid)) {
+            this.hwrWatchMap.delete(tid);
+          }
+        }
       }
     }
 
@@ -372,20 +381,64 @@ export class TradingEngine {
     const currentScanEnabled = controlMode === "STANDALONE" ? true : Boolean(dynamicControl.scanningEnabled);
     if (!currentScanEnabled) return;
 
-    const { target, best, cfg } = context;
+    const { target, best } = context;
     if (this.hwrEvaluatedMarkets.has(best.marketId)) return;
+
+    // Use current settings from runtime/target to avoid stale config
+    const currentTarget = runtime.activeTargets.find(t => t.id === target.id) || target;
+    const currentCfg = withTargetOverrides(runtime.cfg, currentTarget);
+    
+    if (!currentCfg.hwrEnabled) return;
 
     const endTimeMs = new Date(best.endDate).getTime();
     const secondsToSettle = (endTimeMs - Date.now()) / 1000;
 
-    if (secondsToSettle > 0 && secondsToSettle <= runtime.cfg.hwrTriggerSeconds) {
+    // 添加窗口监控日志 (每隔几秒输出一次避免过载)
+    if (secondsToSettle > 0 && secondsToSettle <= currentCfg.hwrTriggerSeconds + 5) {
       const currentPx = price.bestAsk || price.mid;
-      if (currentPx >= cfg.hwrMinPrice && currentPx <= cfg.hwrMaxPrice) {
+      const inPriceRange = currentPx >= currentCfg.hwrMinPrice && currentPx <= currentCfg.hwrMaxPrice;
+      const side = price.tokenId === best.yesTokenId ? "YES" : "NO";
+      
+      if (secondsToSettle <= currentCfg.hwrTriggerSeconds) {
+        if (!inPriceRange) {
+          const throttleKey = `${best.marketId}_${side}_out_range`;
+          if (!this.hwrLogThrottle.has(throttleKey)) {
+            logWarn(`[HWR-WS] In window but price OUT of range`, { 
+              market: best.marketId, 
+              side,
+              px: currentPx, 
+              range: [currentCfg.hwrMinPrice, currentCfg.hwrMaxPrice],
+              rem: Math.floor(secondsToSettle)
+            }, "high-win-rate");
+            this.hwrLogThrottle.add(throttleKey);
+          }
+        }
+      } else {
+        // 即将进入窗口
+        const throttleKey = `${best.marketId}_${side}_approaching`;
+        if (!this.hwrLogThrottle.has(throttleKey)) {
+          logInfo(`[HWR-WS] Approaching window`, {
+            market: best.marketId,
+            side,
+            px: currentPx,
+            rem: Math.floor(secondsToSettle)
+          }, "high-win-rate");
+          this.hwrLogThrottle.add(throttleKey);
+        }
+      }
+      
+      if (secondsToSettle > 0 && secondsToSettle <= currentCfg.hwrTriggerSeconds && inPriceRange) {
         this.hwrEvaluatedMarkets.add(best.marketId);
-        let size = Number((cfg.hwrFixedSizeUsd / currentPx).toFixed(2));
+        this.hwrLogThrottle.clear(); // 触发后清理
+        let size = Number((currentCfg.hwrFixedSizeUsd / currentPx).toFixed(2));
         if (size < 5) size = 5;
 
-        logInfo(`[HWR-WS] Trigger Order!`, { market: best.marketId, side: price.tokenId === best.yesTokenId ? "YES" : "NO", px: currentPx }, "high-win-rate");
+        logSuccess(`[HWR-WS] TRIGGER! Placing order`, { 
+          market: best.marketId, 
+          side, 
+          px: currentPx,
+          size
+        }, "high-win-rate");
 
         runtime.trader.placeBuyOrder({
           tokenId: price.tokenId,
@@ -404,14 +457,14 @@ export class TradingEngine {
             horizonMin: target.horizonMin,
             symbol: targetLabel(target),
             side: price.tokenId === best.yesTokenId ? "YES" : "NO",
-            executionMode: cfg.dryRun ? "DRY_RUN" : "LIVE",
+            executionMode: currentCfg.dryRun ? "DRY_RUN" : "LIVE",
             entryTime: new Date().toISOString(),
             settleTime: best.endDate,
             entryRefPrice: currentPx,
             entryPrice: currentPx,
-            entryNotionalUsd: cfg.dryRun ? currentPx * size : 0,
+            entryNotionalUsd: currentCfg.dryRun ? currentPx * size : 0,
             orderId: orderId ? String(orderId) : undefined,
-            orderStatus: String(resp?.status || (cfg.dryRun ? "DRY_RUN" : "OPEN")),
+            orderStatus: String(resp?.status || (currentCfg.dryRun ? "DRY_RUN" : "OPEN")),
             strategyMeta: { mode: "HIGH_WIN_RATE_SPRINT" }
           });
         }).catch(e => logError("HWR-WS error", e, "high-win-rate"));
