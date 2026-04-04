@@ -37,9 +37,14 @@ function pruneRuntimeLogFile(nowMs = Date.now()): void {
 function appendRuntimeLog(ts: string, msg: string, obj?: unknown): void {
   try {
     fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
-    pruneRuntimeLogFile();
+    // prune is still sync but we run it less often by probability or a separate timer
+    if (Math.random() < 0.01) pruneRuntimeLogFile(); 
+    
     const payload = obj === undefined ? undefined : JSON.parse(JSON.stringify(obj));
-    fs.appendFileSync(LOG_FILE, JSON.stringify({ ts, msg, data: payload }) + "\n", "utf8");
+    const logLine = JSON.stringify({ ts, msg, data: payload }) + "\n";
+    
+    // Use async append to not block the event loop
+    fs.appendFile(LOG_FILE, logLine, "utf8", () => {});
   } catch {
     // best effort
   }

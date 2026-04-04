@@ -72,6 +72,9 @@ export class TradingEngine {
   private hwrWatchMap = new Map<string, { target: any, best: any, cfg: any }>();
   private lastSummaryKey = "";
   private hwrLogThrottle = new Set<string>();
+  private lastControlState: any = null;
+  private currentRuntime: RuntimeContext | null = null;
+  private currentControlMode: BotControlMode = "STANDALONE";
 
   constructor(
     private readonly state: StateStore,
@@ -107,8 +110,20 @@ export class TradingEngine {
   }
 
   public async executeCycle(runtime: RuntimeContext, controlMode: BotControlMode): Promise<void> {
+    this.currentRuntime = runtime;
+    this.currentControlMode = controlMode;
+
     const { cfg, gamma, trader, activeTargets } = runtime;
     pruneExpiredCycleLocks(this.targetAnalysisLocks);
+
+    // Initial registration of Price Update handler if not already done
+    if (runtime.priceService && !runtime.priceService.onPriceUpdate) {
+      runtime.priceService.onPriceUpdate = (price) => {
+        if (this.currentRuntime) {
+          this.executeHwrSprint(price, this.currentRuntime, this.currentControlMode).catch(() => {});
+        }
+      };
+    }
 
     // ── 性能摘要更新 ──────────────────────────────────────────────────
     const perfMode = cfg.dryRun ? "DRY_RUN" : "LIVE";
@@ -222,8 +237,8 @@ export class TradingEngine {
     }
 
     // ── 策略扫描开关 ──────────────────────────────────────────────────
-    const controlState = readBotControlState();
-    const scanEnabled = controlMode === "STANDALONE" ? true : Boolean(controlState.scanningEnabled);
+    this.lastControlState = readBotControlState();
+    const scanEnabled = controlMode === "STANDALONE" ? true : Boolean(this.lastControlState.scanningEnabled);
     if (scanEnabled !== this.lastScanEnabled) {
       logInfo("scan state updated", { controlMode, scanningEnabled: scanEnabled }, "system");
       this.lastScanEnabled = scanEnabled;
@@ -233,11 +248,8 @@ export class TradingEngine {
       return;
     }
 
-    // ── WebSocket HWR 回调注册 ──────────────────────────────────────
+    // ── WebSocket HWR 管理 ──────────────────────────────────────────
     if (runtime.priceService) {
-      runtime.priceService.onPriceUpdate = (price) => {
-        this.executeHwrSprint(price, runtime, controlMode).catch(() => {});
-      };
 
       // 实时扫描兜底
       if (cfg.hwrEnabled) {
@@ -257,8 +269,8 @@ export class TradingEngine {
     const tokensToWatch: string[] = [];
 
     if (cfg.dualSideEnabled || cfg.hwrEnabled) {
-      for (const target of activeTargets) {
-        if (this.targetAnalysisLocks.has(target.id)) continue;
+      await Promise.all(activeTargets.map(async (target) => {
+        if (this.targetAnalysisLocks.has(target.id)) return;
         try {
           const markets = await gamma.getCandidateMarketsForTarget(target, 50);
           const best = gamma.selectBestMarketForTarget(markets, target, new Date(), tradedMarketIds);
@@ -274,7 +286,8 @@ export class TradingEngine {
         } catch (err) {
           logError(`[${targetLabel(target)}] discovery error`, err instanceof Error ? err.message : err, "search-market");
         }
-      }
+      }));
+
       if (runtime.priceService) {
         runtime.priceService.updateWatchedTokens(tokensToWatch);
         
@@ -377,9 +390,9 @@ export class TradingEngine {
     const context = this.hwrWatchMap.get(price.tokenId);
     if (!context) return;
 
-    const dynamicControl = readBotControlState();
-    const currentScanEnabled = controlMode === "STANDALONE" ? true : Boolean(dynamicControl.scanningEnabled);
-    if (!currentScanEnabled) return;
+    // Use cached control state to avoid disk I/O in hot path
+    const currentPriceScanEnabled = controlMode === "STANDALONE" ? true : Boolean(this.lastControlState?.scanningEnabled);
+    if (!currentPriceScanEnabled) return;
 
     const { target, best } = context;
     if (this.hwrEvaluatedMarkets.has(best.marketId)) return;
