@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export type BotControlMode = "WEB_CONTROLLED" | "STANDALONE";
+import { BotControlMode } from "../types.js";
 
 export interface BotControlState {
   scanningEnabled: boolean;
@@ -57,4 +57,27 @@ export function resolveBotControlMode(raw: string | undefined): BotControlMode {
     return "WEB_CONTROLLED";
   }
   return "STANDALONE";
+}
+
+const CONFIG_KEY_FILE = path.resolve("state", "config.key");
+const RELOAD_TOKEN_FILE = path.resolve("state", "config.reload.token");
+
+export function readConfigKey(): string {
+  try {
+    if (!fs.existsSync(CONFIG_KEY_FILE)) return "default";
+    return fs.readFileSync(CONFIG_KEY_FILE, "utf8").trim() || "default";
+  } catch {
+    return "default";
+  }
+}
+
+export function readReloadToken(): number {
+  try {
+    if (!fs.existsSync(RELOAD_TOKEN_FILE)) return 0;
+    const raw = fs.readFileSync(RELOAD_TOKEN_FILE, "utf8").trim();
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
 }

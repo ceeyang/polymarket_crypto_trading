@@ -118,3 +118,24 @@ export interface BotState {
   trades?: LiveTradeRecord[];
   predictions?: PredictionAuditRecord[];
 }
+
+import { Config, MarketTarget } from "./config.js";
+import { GammaClient } from "./clients/gamma.js";
+import { PolymarketTrader } from "./clients/polymarket.js";
+import { RealtimePriceService } from "./services/realtime-price.js";
+
+export type BotControlMode = "STANDALONE" | "WEB_CONTROLLED";
+
+export interface StartBotOptions {
+  controlMode?: BotControlMode;
+}
+
+export interface RuntimeContext {
+  cfg: Config;
+  cfgKey: string;
+  reloadToken: number;
+  gamma: GammaClient;
+  trader: PolymarketTrader;
+  priceService: RealtimePriceService;
+  activeTargets: MarketTarget[];
+}

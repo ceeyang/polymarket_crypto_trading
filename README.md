@@ -1,16 +1,15 @@
 # Polymarket Dual-Side Multi-Horizon Bot
 
-一个基于 TypeScript 的 Polymarket 双边挂单机器人。
+一个基于 TypeScript 的 Polymarket 自动化交易机器人。项目目前已完成全面模块化重构，采用 Service-Oriented Architecture (SOA) 架构，显著提升了系统的可维护性与扩展性。
 
-当前版本只做一件事：
+### 核心特性
 
-- 可同时启用多个币种的 `5m / 15m / 1h` 盘口
-- 每个盘口当前周期内，只下单一次
-- `YES` 和 `NO` 都按当前配置的多档价格与份数同时挂单，默认三档阶梯：`$0.10 x 15`、`$0.05 x 20`、`$0.02 x 50`
-- 盘口结束后自动撤销未成交余单
-- 已成交仓位等待官方结果结算
-- 按固定间隔自动赎回收益
-- 是否模拟下单以 `config/runtime.json` 当前配置为准
+- **多周期全自动化对冲**：可同时开启 `5m / 15m / 1h` 多个阶梯挂单目标。
+- **高胜率扫尾冲刺 (HWR)**：集成 WebSocket 实时价格对冲策略，专抓到期前的套利机会。
+- **全面模块化重构**：核心逻辑已拆分为 `TradingEngine`, `OrderService`, `PositionService` 等独立服务。
+- **动态负载/热重载**：支持不停止进程的情况下热重载 `config/runtime.json` 策略配置。
+- **多维度监控**：通过 WebUI 实时监控盈亏、订单状态与系统日志。
+- **自动收益赎回**：按固定间隔自动化 Claim 可领取的交易收益。
 
 ## 启动
 

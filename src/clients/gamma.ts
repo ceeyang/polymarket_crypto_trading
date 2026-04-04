@@ -2,7 +2,7 @@ import axios from "axios";
 
 import type { Config, MarketTarget, SupportedCoin, SupportedHorizon } from "../config.js";
 import type { GammaMarket, SelectedMarket } from "../types.js";
-import { has1hHint, has15mHint, has5mHint, hasClockHint, hasEthKeyword, minutesUntil, parseJsonArray, toNum } from "../utils.js";
+import { has1hHint, has15mHint, has5mHint, hasClockHint, hasEthKeyword, minutesUntil, parseStringArray, toNum } from "../utils.js";
 
 export class GammaClient {
   constructor(private readonly config: Config) { }
@@ -107,9 +107,9 @@ export class GammaClient {
 
       const liquidity = toNum(m.liquidity, 0);
 
-      const outcomes = parseJsonArray(m.outcomes);
-      const outcomePrices = parseJsonArray(m.outcomePrices).map((x) => toNum(x, NaN));
-      const clobTokenIds = parseJsonArray(m.clobTokenIds);
+      const outcomes = parseStringArray(m.outcomes);
+      const outcomePrices = parseStringArray(m.outcomePrices).map((x) => toNum(x, NaN));
+      const clobTokenIds = parseStringArray(m.clobTokenIds);
 
       const tokensFromField = Array.isArray(m.tokens) ? m.tokens : [];
 
@@ -292,7 +292,7 @@ export class GammaClient {
   }
 
   private getSearchableText(m: GammaMarket): string {
-    const tagText = parseJsonArray(m.tags).join(" ");
+    const tagText = parseStringArray(m.tags).join(" ");
     const parts = [
       m.question,
       m.title,
@@ -425,5 +425,16 @@ export class GammaClient {
   private horizonSlugTags(horizonMin: SupportedHorizon): string[] {
     if (horizonMin === 60) return ["1h", "60m"];
     return [`${horizonMin}m`];
+  }
+}
+
+export async function fetchGammaMarketById(cfg: Config, marketId: string): Promise<any | null> {
+  try {
+    const { data } = await axios.get(`${cfg.gammaHost}/markets/${encodeURIComponent(marketId)}`, { timeout: 15_000 });
+    if (data && typeof data === "object" && !Array.isArray(data)) return data;
+    if (data?.data && typeof data.data === "object" && !Array.isArray(data.data)) return data.data;
+    return null;
+  } catch {
+    return null;
   }
 }

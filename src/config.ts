@@ -22,6 +22,7 @@ export interface MarketTarget {
   coin: SupportedCoin;
   horizonMin: SupportedHorizon;
   symbol: string;
+  overrides?: any;
 }
 
 export interface StrategyOrderEntry {

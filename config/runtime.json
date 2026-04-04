@@ -17,9 +17,9 @@
     },
     "hwr": {
       "enabled": true,
-      "triggerSeconds": 60,
-      "minPrice": 0.9,
-      "maxPrice": 0.98,
+      "triggerSeconds": 30,
+      "minPrice": 0.98,
+      "maxPrice": 0.99,
       "fixedSizeUsd": 1
     },
     "targets": [
@@ -46,7 +46,7 @@
       },
       {
         "id": "ETH_5m",
-        "enabled": true,
+        "enabled": false,
         "coin": "ETH",
         "horizonMin": 5,
         "symbol": "ETHUSDT"
