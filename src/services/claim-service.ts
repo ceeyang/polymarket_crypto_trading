@@ -12,6 +12,8 @@ import { createWalletClient, encodeFunctionData, http, isAddress, type Hex, zero
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
 
+import { logInfo, logWarn, logError } from "./logger.js";
+
 import type { Config } from "../config.js";
 
 const LOG_TO_STDOUT = !["0", "false", "off", "no"].includes(String(process.env.LOG_TO_STDOUT || "1").trim().toLowerCase());
@@ -61,12 +63,7 @@ export interface ClaimRunSummary {
 }
 
 function log(prefix: string, msg: string, obj?: unknown): void {
-  if (!LOG_TO_STDOUT) return;
-  if (obj == null) {
-    console.log(`${prefix} ${msg}`);
-  } else {
-    console.log(`${prefix} ${msg}`, obj);
-  }
+  logInfo(`${prefix} ${msg}`, obj, "claim-service");
 }
 
 function normalizeConditionId(raw: unknown): string | null {

@@ -14,8 +14,8 @@ import type { LiveTradeRecord, PredictionAuditRecord, SelectedMarket, SideName }
 import { sleep } from "./utils.js";
 import { RealtimePriceService } from "./services/realtime-price.js";
 
+import { logInfo, logWarn, logError, logSuccess } from "./services/logger.js";
 
-const LOG_FILE = path.resolve("state", "runtime.log");
 const RELOAD_SIGNAL_FILE = path.resolve("state", "config.reload.signal");
 const LOG_TO_STDOUT = !["0", "false", "off", "no"].includes(String(process.env.LOG_TO_STDOUT || "1").trim().toLowerCase());
 const AUTO_CLAIM_MAX_RUNTIME_MS = Math.max(
@@ -26,77 +26,6 @@ const LIVE_SYNC_MAX_CHECKS = Math.max(
   10,
   Math.floor(Number(process.env.LIVE_SYNC_MAX_CHECKS || 80)),
 );
-const LOG_RETENTION_MS = 24 * 60 * 60 * 1000;
-const LOG_PRUNE_INTERVAL_MS = 5 * 60 * 1000;
-let lastLogPruneAtMs = 0;
-
-function isLogLineRetained(line: string, cutoffMs: number): boolean {
-  try {
-    const parsed = JSON.parse(line);
-    const ts = Date.parse(String(parsed?.ts ?? ""));
-    return !Number.isFinite(ts) || ts >= cutoffMs;
-  } catch {
-    return true;
-  }
-}
-
-function pruneRuntimeLogFile(nowMs = Date.now()): void {
-  if (nowMs - lastLogPruneAtMs < LOG_PRUNE_INTERVAL_MS) return;
-  lastLogPruneAtMs = nowMs;
-
-  try {
-    if (!fs.existsSync(LOG_FILE)) return;
-    const cutoffMs = nowMs - LOG_RETENTION_MS;
-    const raw = fs.readFileSync(LOG_FILE, "utf8");
-    const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
-    const kept = lines.filter((line) => isLogLineRetained(line, cutoffMs));
-    if (kept.length === lines.length) return;
-    fs.writeFileSync(LOG_FILE, kept.join("\n") + (kept.length ? "\n" : ""), "utf8");
-  } catch {
-    // best effort
-  }
-}
-
-function appendRuntimeLog(ts: string, msg: string, obj?: unknown): void {
-  try {
-    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
-    pruneRuntimeLogFile();
-    const payload = obj === undefined ? undefined : JSON.parse(JSON.stringify(obj));
-    fs.appendFileSync(LOG_FILE, JSON.stringify({ ts, msg, data: payload }) + "\n", "utf8");
-  } catch {
-    // best effort
-  }
-}
-
-function formatDate(date: Date): string {
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  const h = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `${m}-${d} ${h}:${min}`;
-}
-
-function log(msg: string, obj?: unknown, tag = "system", level = "info") {
-  const tsISO = new Date().toISOString();
-  const tsDisplay = formatDate(new Date());
-  const tagPart = `[${tag}]`.padEnd(16);
-  const levelPart = `[${level}]`.padEnd(10);
-  const taggedMsg = `${tagPart} ${levelPart} ${msg}`;
-
-  if (LOG_TO_STDOUT) {
-    if (obj == null) {
-      console.log(`${tsDisplay} ${taggedMsg}`);
-    } else {
-      console.log(`${tsDisplay} ${taggedMsg}`, obj);
-    }
-  }
-  appendRuntimeLog(tsISO, `${tsDisplay} ${taggedMsg}`, obj);
-}
-
-function logInfo(msg: string, obj?: unknown, tag = "system") { log(msg, obj, tag, "info"); }
-function logWarn(msg: string, obj?: unknown, tag = "system") { log(msg, obj, tag, "warn"); }
-function logError(msg: string, obj?: unknown, tag = "system") { log(msg, obj, tag, "error"); }
-function logSuccess(msg: string, obj?: unknown, tag = "system") { log(msg, obj, tag, "success"); }
 
 function targetLabel(t: MarketTarget): string {
   return `${t.coin}_${t.horizonMin}m`;
@@ -1085,7 +1014,7 @@ export async function startBot(options?: StartBotOptions): Promise<void> {
             logPrefix: "[auto-claim]",
             quietNoop: true,
             maxConcurrency: 3,
-            logger: log,
+            logger: logInfo,
           });
 
           // 独立监听 late error，不影响 race 结果

@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import type { Config } from "../config.js";
+import { logInfo, logWarn, logError } from "./logger.js";
 
 /**
  * 实时价格信息数据结构
@@ -87,7 +88,7 @@ export class RealtimePriceService {
     // wss://ws-subscriptions-clob.polymarket.com/ws/market
     const wsHost = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 
-    console.log(`[realtime-price] connecting to ${wsHost}`);
+    logInfo(`connecting to ${wsHost}`, undefined, "realtime-price");
 
     try {
       this.ws = new WebSocket(wsHost, {
@@ -99,20 +100,20 @@ export class RealtimePriceService {
       });
 
       this.ws.on("open", () => {
-        console.log("[realtime-price] websocket connected to market channel");
+        logInfo("websocket connected to market channel", undefined, "realtime-price");
         this.connected = true;
         this.startPing();
         this.resubscribeAll();
       });
 
       this.ws.on("close", (code, reason) => {
-        console.warn(`[realtime-price] websocket closed code=${code} reason=${reason}, reconnecting in 5s...`);
+        logWarn(`websocket closed code=${code} reason=${reason}, reconnecting in 5s...`, undefined, "realtime-price");
         this.connected = false;
         this.scheduleReconnect();
       });
 
       this.ws.on("error", (err) => {
-        console.error("[realtime-price] websocket error:", err.message || err);
+        logError(`websocket error: ${err.message || err}`, undefined, "realtime-price");
       });
 
       this.ws.on("message", (data) => {
@@ -124,7 +125,7 @@ export class RealtimePriceService {
       });
 
     } catch (err) {
-      console.error("[realtime-price] failed to initiate websocket connection", err);
+      logError("failed to initiate websocket connection", err, "realtime-price");
       this.scheduleReconnect();
     }
   }
@@ -185,7 +186,7 @@ export class RealtimePriceService {
             lastUpdateAtMs: Date.now(),
           });
           if (isNew) {
-            console.log(`[realtime-price] initially received price for ${tokenId}: Bid=${bid} Ask=${ask}`);
+            logInfo(`initially received price for ${tokenId}: Bid=${bid} Ask=${ask}`, undefined, "realtime-price");
           }
 
           // 如果注册了回掉，则触发实时逻辑
@@ -221,6 +222,6 @@ export class RealtimePriceService {
     });
 
     this.ws.send(payload);
-    console.log(`[realtime-price] subscribed to market channel for ${tokenIds.length} tokens`);
+    logInfo(`subscribed to market channel for ${tokenIds.length} tokens`, undefined, "realtime-price");
   }
 }
